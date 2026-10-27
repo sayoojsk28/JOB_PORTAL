@@ -1,5 +1,5 @@
 
-from sqlalchemy import Column, Integer, String, Date
+from sqlalchemy import Column, Integer, String, Date , Text, ForeignKey, DateTime, func
 from sqlalchemy import text
 from database import Base
 
@@ -52,6 +52,27 @@ class Admin(Base):
         nullable=False,
         default="Active",
         server_default=text("'Active'")
+    )
+
+
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    qualification = Column(String, nullable=False)
+    department = Column(String, nullable=False)
+    location = Column(String, nullable=False)
+    salary = Column(String, nullable=True)
+    employment_type = Column(String, nullable=False)
+    vacancies = Column(Integer, nullable=False, default=1)
+    status = Column(String, nullable=False, default="Open")
+    created_by = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
     )
 
 

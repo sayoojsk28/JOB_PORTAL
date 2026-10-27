@@ -1,4 +1,5 @@
 
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -14,7 +15,9 @@ from schemas import (
     EmployeeResponse,
     LoginRequest,
     LoginResponse,
-    EmployeeStatusUpdate
+    EmployeeStatusUpdate,
+    JobCreate, 
+    JobResponse,
 )
 import os
 from dotenv import load_dotenv
@@ -25,6 +28,17 @@ import jwt
 
 load_dotenv()
 app = FastAPI(title="Job Portal API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def get_db():
     db = SessionLocal()
@@ -140,6 +154,30 @@ def require_admin(
         )
 
     return current_user
+
+def require_employee(
+    current_user=Depends(get_current_user),
+):
+    if not isinstance(current_user, models.Employee):
+        raise HTTPException(
+            status_code=403,
+            detail="Employee access required",
+        )
+
+    return current_user
+
+
+def require_student(
+    current_user=Depends(get_current_user),
+):
+    if not isinstance(current_user, models.Student):
+        raise HTTPException(
+            status_code=403,
+            detail="Student access required",
+        )
+
+    return current_user
+
 
 
 def create_default_admin():
@@ -348,6 +386,39 @@ def employee_login(
     }
 
 
+@app.post("/auth/student/login", response_model=LoginResponse)
+def student_login(
+    login_data: LoginRequest,
+    db: Session = Depends(get_db),
+):
+    student = db.query(models.Student).filter(
+        models.Student.email == login_data.email
+    ).first()
+
+    if not student or not password_hash.verify(
+        login_data.password, student.hashed_password
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password",
+        )
+
+    if student.status != "Active":
+        raise HTTPException(
+            status_code=403,
+            detail=f"Your account status is {student.status}. Access denied.",
+        )
+
+    token = create_access_token(student.id, "student")
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "role": "student",
+    }
+
+
+
 
 @app.get("/auth/me")
 def get_my_account(
@@ -418,6 +489,104 @@ def update_employee_status(
         "employee_id": employee.id,
         "status": employee.status,
     }
+
+
+@app.patch("/employee/students/{student_id}/status")
+def update_student_status(
+    student_id: int,
+    status_data: EmployeeStatusUpdate,
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    student = db.query(models.Student).filter(
+        models.Student.id == student_id
+    ).first()
+
+    if not student:
+        raise HTTPException(
+            status_code=404,
+            detail="Student not found",
+        )
+
+    student.status = status_data.status
+    db.commit()
+    db.refresh(student)
+
+    return {
+        "message": f"Student status updated to {student.status}",
+        "student_id": student.id,
+        "status": student.status,
+    }
+
+
+@app.get("/employee/students/pending")
+def get_pending_students(
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    students = db.query(models.Student).filter(
+        models.Student.status == "Pending"
+    ).all()
+
+    return [
+        {
+            "id": student.id,
+            "full_name": student.full_name,
+            "email": student.email,
+            "phone": student.phone,
+            "qualification": student.qualification,
+            "department": student.department,
+            "year_of_passing": student.year_of_passing,
+        }
+        for student in students
+    ]
+
+
+@app.get("/student/me")
+def get_student_profile(
+    student=Depends(require_student),
+):
+    return {
+        "id": student.id,
+        "full_name": student.full_name,
+        "email": student.email,
+        "status": student.status,
+    }
+
+
+@app.post("/employee/jobs", response_model=JobResponse, status_code=201)
+def create_job(
+    job_data: JobCreate,
+    db: Session = Depends(get_db),
+    employee: models.Employee = Depends(require_employee),
+):
+    new_job = models.Job(
+        **job_data.model_dump(),
+        created_by=employee.id,
+    )
+
+    db.add(new_job)
+    db.commit()
+    db.refresh(new_job)
+
+    return new_job
+
+@app.get("/student/jobs", response_model=list[JobResponse])
+def get_open_jobs(
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    jobs = (
+        db.query(models.Job)
+        .filter(models.Job.status == "Open")
+        .order_by(models.Job.id.desc())
+        .all()
+    )
+
+    return jobs
+
+
+
 
 
 

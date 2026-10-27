@@ -64,3 +64,32 @@ class EmployeeStatusUpdate(BaseModel):
     status: str = Field(pattern="^(Active|Rejected)$")
 
 
+
+class JobCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=150)
+    description: str = Field(min_length=10)
+    qualification: str = Field(min_length=2, max_length=150)
+    department: str = Field(min_length=2, max_length=100)
+    location: str = Field(min_length=2, max_length=150)
+    salary: str | None = None
+    employment_type: str = Field(min_length=2, max_length=50)
+    vacancies: int = Field(ge=1)
+
+
+class JobResponse(BaseModel):
+    id: int
+    title: str
+    description: str
+    qualification: str
+    department: str
+    location: str
+    salary: str | None
+    employment_type: str
+    vacancies: int
+    status: str
+    created_by: int
+
+    class Config:
+        from_attributes = True
+
+

@@ -13,3 +13,17 @@ __pycache__/
 # Frontend dependencies
 node_modules/
 dist/
+
+# Frontend environment files
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Frontend build and local files
+frontend/dist/
+frontend/node_modules/
+frontend/.vite/
+
+# Python environment files
+.env.*
+!.env.example
