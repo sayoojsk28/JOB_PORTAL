@@ -29,6 +29,7 @@ const Register = () => {
 
   const [role, setRole] = useState('student');
   const [form, setForm] = useState(initialForm);
+  const [profilePhoto, setProfilePhoto] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
@@ -71,39 +72,54 @@ const Register = () => {
       return;
     }
 
-    const payload =
-      role === 'student'
-        ? {
-            full_name: form.full_name.trim(),
-            email: form.email.trim(),
-            phone: form.phone.trim(),
-            date_of_birth: form.date_of_birth,
-            gender: form.gender,
-            address: form.address.trim(),
-            qualification: form.qualification.trim(),
-            department: form.department.trim(),
-            year_of_passing: Number(form.year_of_passing),
-            skills: form.skills.trim(),
-            password: form.password,
-          }
-        : {
-            full_name: form.full_name.trim(),
-            email: form.email.trim(),
-            phone: form.phone.trim(),
-            designation: form.designation.trim(),
-            password: form.password,
-          };
+    
+    const endpoint =
+      role === 'student' ? '/students/register' : '/employees/register';
+
+    let payload;
+
+    if (role === 'student') {
+      payload = {
+        full_name: form.full_name.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim(),
+        date_of_birth: form.date_of_birth,
+        gender: form.gender,
+        address: form.address.trim(),
+        qualification: form.qualification.trim(),
+        department: form.department.trim(),
+        year_of_passing: Number(form.year_of_passing),
+        skills: form.skills.trim(),
+        password: form.password,
+      };
+    } else {
+      payload = new FormData();
+
+      payload.append('full_name', form.full_name.trim());
+      payload.append('email', form.email.trim());
+      payload.append('phone', form.phone.trim());
+      payload.append('designation', form.designation.trim());
+      payload.append('password', form.password);
+
+      if (profilePhoto) {
+        payload.append('profile_photo', profilePhoto);
+      }
+    }
 
     setLoading(true);
+
 
     try {
       const endpoint =
         role === 'student' ? '/students/register' : '/employees/register';
 
+      
       await api.post(endpoint, payload);
 
-      setSuccess('Account created successfully! Please sign in.');
-      setTimeout(() => navigate(`/login/${role}`), 1000);
+      if (role === 'student') {
+        navigate('/student/registration-success');
+      } 
+
     } catch (err) {
       const detail = err.response?.data?.detail;
 
@@ -285,6 +301,50 @@ const Register = () => {
                   />
                 </div>
               )}
+            
+            {role === 'employee' && (
+              <div>
+                <label className={labelClass} htmlFor="profile_photo">
+                  Profile photo <span className="font-normal text-slate-400">(Optional)</span>
+                </label>
+
+                <input
+                  className={inputClass}
+                  id="profile_photo"
+                  name="profile_photo"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) =>
+                    setProfilePhoto(e.target.files?.[0] || null)
+                  }
+                />
+
+                <p className="mt-2 text-xs text-slate-500">
+                  Accepted formats: JPG, PNG or WEBP.
+                </p>
+
+                {profilePhoto && (
+                  <div className="mt-3 flex items-center gap-3">
+                    <img
+                      src={URL.createObjectURL(profilePhoto)}
+                      alt="Selected profile preview"
+                      className="h-16 w-16 rounded-full border border-slate-200 object-cover"
+                    />
+                    <span className="break-all text-sm text-slate-600">
+                      {profilePhoto.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setProfilePhoto(null)}
+                      className="text-sm font-semibold text-red-600 hover:text-red-800"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             </div>
 
             {role === 'student' && (

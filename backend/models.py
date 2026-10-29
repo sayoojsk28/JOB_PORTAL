@@ -38,7 +38,7 @@ class Employee(Base):
         default="Pending",
         server_default=text("'Pending'")
     )
-
+    profile_photo = Column(String(255), nullable=True)
 
 class Admin(Base):
     __tablename__ = "admins"

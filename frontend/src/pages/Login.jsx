@@ -175,7 +175,7 @@ const Login = () => {
     <main className="min-h-screen bg-white lg:grid lg:grid-cols-2">
       
 {/* Left branding panel */}
-<section className="relative hidden min-h-screen overflow-hidden bg-gradient-to-br from-blue-950 via-blue-800 to-blue-600 px-12 py-10 text-white lg:flex lg:flex-col lg:justify-between xl:px-20">
+<section className="relative hidden min-h-screen overflow-hidden bg-gradient-to-br from-blue-950 via-blue-950 to-blue-800 px-12 py-10 text-white lg:flex lg:flex-col lg:justify-between xl:px-20">
   <div className="absolute -right-24 top-28 h-80 w-80 rounded-full border border-white/10" />
   <div className="absolute -right-10 top-44 h-52 w-52 rounded-full border border-white/10" />
   <div className="absolute -bottom-40 -left-24 h-96 w-96 rounded-full bg-blue-400/10 blur-3xl" />

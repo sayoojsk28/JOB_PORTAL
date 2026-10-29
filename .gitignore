@@ -16,3 +16,10 @@ dist/
 
 # Logs
 *.log
+
+# Uploaded user files
+backend/uploads/
+
+# Generated ChromaDB database
+backend/chatbot/chroma_db/
+

@@ -47,6 +47,7 @@ class EmployeeResponse(BaseModel):
     phone: str
     designation: str
     status: str
+    profile_photo: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -92,4 +93,7 @@ class JobResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class AdminChangePassword(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 

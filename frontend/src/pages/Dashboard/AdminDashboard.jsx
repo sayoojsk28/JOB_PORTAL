@@ -9,7 +9,7 @@ const adminOptions = [
     icon: 'users',
     color: 'blue',
     path: '/admin/employees',
-    status: 'Coming soon',
+    status: 'Available',
   },
   {
     title: 'Pending Employees',
@@ -33,7 +33,7 @@ const adminOptions = [
     icon: 'key-round',
     color: 'violet',
     path: '/admin/change-password',
-    status: 'Coming soon',
+    status: 'Available',
   },
   {
     title: 'Employee Status',

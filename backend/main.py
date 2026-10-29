@@ -1,6 +1,7 @@
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Depends, HTTPException, status
+
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from pwdlib import PasswordHash
@@ -18,16 +19,34 @@ from schemas import (
     EmployeeStatusUpdate,
     JobCreate, 
     JobResponse,
+    AdminChangePassword,
 )
 import os
+import uuid
+from fastapi import File, Form, UploadFile
+from pydantic import EmailStr,BaseModel, Field
+from chatbot.rag_service import answer_question
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
+from fastapi.staticfiles import StaticFiles
 
 import jwt
+os.makedirs("uploads/employee_photos", exist_ok=True)
 
 
 load_dotenv()
 app = FastAPI(title="Job Portal API")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
+
+os.makedirs(os.path.join(UPLOADS_DIR, "employee_photos"), exist_ok=True)
+
+app.mount(
+    "/uploads",
+    StaticFiles(directory=UPLOADS_DIR),
+    name="uploads",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -224,6 +243,8 @@ def create_default_admin():
 
 
 
+class ChatbotQuestion(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
 
 create_default_admin()
 
@@ -288,12 +309,17 @@ def register_student(
     status_code=status.HTTP_201_CREATED,
 )
 def register_employee(
-    employee: EmployeeRegister,
+    full_name: str = Form(..., min_length=2, max_length=100),
+    email: EmailStr = Form(...),
+    phone: str = Form(..., min_length=7, max_length=20),
+    designation: str = Form(..., min_length=2, max_length=100),
+    password: str = Form(..., min_length=8, max_length=128),
+    profile_photo: UploadFile | None = File(None),
     db: Session = Depends(get_db),
 ):
     existing_employee = (
         db.query(models.Employee)
-        .filter(models.Employee.email == employee.email)
+        .filter(models.Employee.email == email)
         .first()
     )
 
@@ -303,12 +329,41 @@ def register_employee(
             detail="Email is already registered",
         )
 
+    photo_path = None
+
+    if profile_photo and profile_photo.filename:
+        allowed_types = {"image/jpeg", "image/png", "image/webp"}
+
+        if profile_photo.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=400,
+                detail="Only JPG, PNG, and WEBP images are allowed",
+            )
+
+        extension = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp",
+        }[profile_photo.content_type]
+
+        os.makedirs("uploads/employee_photos", exist_ok=True)
+
+        filename = f"{uuid.uuid4().hex}{extension}"
+        photo_path = f"uploads/employee_photos/{filename}"
+
+        try:
+            with open(photo_path, "wb") as image_file:
+                image_file.write(profile_photo.file.read())
+        finally:
+            profile_photo.file.close()
+
     new_employee = models.Employee(
-        full_name=employee.full_name,
-        email=employee.email,
-        phone=employee.phone,
-        designation=employee.designation,
-        hashed_password=password_hash.hash(employee.password),
+        full_name=full_name,
+        email=email,
+        phone=phone,
+        designation=designation,
+        hashed_password=password_hash.hash(password),
+        profile_photo=photo_path,
     )
 
     try:
@@ -317,6 +372,10 @@ def register_employee(
         db.refresh(new_employee)
     except IntegrityError:
         db.rollback()
+
+        if photo_path and os.path.exists(photo_path):
+            os.remove(photo_path)
+
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="An employee with these details already exists",
@@ -353,6 +412,37 @@ def admin_login(login_data: LoginRequest, db: Session = Depends(get_db)):
         "role": "admin"
     }
 
+@app.post("/auth/admin/change-password")
+def change_admin_password(
+    password_data: AdminChangePassword,
+    admin=Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if not password_hash.verify(
+        password_data.current_password,
+        admin.hashed_password,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Current password is incorrect",
+        )
+
+    if password_data.current_password == password_data.new_password:
+        raise HTTPException(
+            status_code=400,
+            detail="New password must be different from current password",
+        )
+
+    admin.hashed_password = password_hash.hash(
+        password_data.new_password
+    )
+
+    db.commit()
+    db.refresh(admin)
+
+    return {
+        "message": "Password changed successfully"
+    }
 
 @app.post("/auth/employee/login", response_model=LoginResponse)
 def employee_login(
@@ -457,10 +547,43 @@ def get_pending_employees(
             "email": employee.email,
             "phone": employee.phone,
             "designation": employee.designation,
+            "profile_photo": (
+            f"/{employee.profile_photo}"
+            if employee.profile_photo
+            else None
+            ),
             "status": employee.status,
         }
         for employee in employees
     ]
+
+
+@app.get("/admin/employees")
+def get_active_employees(
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    employees = db.query(models.Employee).filter(
+        models.Employee.status == "Active"
+    ).all()
+
+    return [
+        {
+            "id": employee.id,
+            "full_name": employee.full_name,
+            "email": employee.email,
+            "phone": employee.phone,
+            "designation": employee.designation,
+            "profile_photo": (
+            f"/{employee.profile_photo}"
+            if employee.profile_photo
+            else None
+            ),
+            "status": employee.status,
+        }
+        for employee in employees
+    ]
+
 
 
 @app.patch("/admin/employees/{employee_id}/status")
@@ -584,6 +707,13 @@ def get_open_jobs(
     )
 
     return jobs
+
+@app.post("/chatbot/ask")
+def ask_chatbot(
+    payload: ChatbotQuestion,
+    current_user=Depends(require_student),
+):
+    return answer_question(payload.question)
 
 
 

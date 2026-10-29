@@ -8,11 +8,15 @@ import Profile from '../pages/Profile';
 import ProtectedRoute from '../components/ProtectedRoute';
 import AdminDashboard from '../pages/Dashboard/AdminDashboard';
 import RecruiterDashboard from '../pages/Dashboard/RecruiterDashboard';
-import JobSeekerDashboard from '../pages/Dashboard/JobSeekerDashboard';
+import StudentDashboard from '../pages/student/StudentDashboard';
 import JobList from '../pages/Jobs/JobList';
 import JobDetails from '../pages/Jobs/JobDetails';
 import CreateJob from '../pages/Jobs/CreateJob';
 import PendingEmployees from '../pages/Dashboard/PendingEmployees';
+import ViewEmployees from '../pages/Dashboard/ViewEmployees';
+import ChangePassword from '../pages/Dashboard/ChangePassword';
+import StudentRegistrationSuccess from '../pages/student/StudentRegistrationSuccess';
+import Chatbot from '../pages/student/Chatbot';
 
 const AppRoutes = () => {
   return (
@@ -25,6 +29,10 @@ const AppRoutes = () => {
 	<Route path="/register/:role" element={<Register />} />
 	<Route path="/jobs" element={<JobList />} />
 	<Route path="/jobs/:id" element={<JobDetails />} />
+  <Route
+      path="/student/registration-success"
+      element={<StudentRegistrationSuccess />}
+  />
 
 
       {/* Protected Routes */}
@@ -38,6 +46,14 @@ const AppRoutes = () => {
     path="/admin/employees/pending"
     element={<PendingEmployees />}
   />
+  <Route
+  path="/admin/employees"
+  element={<ViewEmployees />}
+/>
+<Route
+    path="/admin/change-password"
+    element={<ChangePassword />}
+  />
 </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['employee']} />}>
@@ -46,7 +62,14 @@ const AppRoutes = () => {
       </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['student']} />}>
-        <Route path="/student/dashboard" element={<JobSeekerDashboard />} />
+        <Route
+  path="/student/dashboard"
+  element={<StudentDashboard />}
+/>
+ <Route
+    path="/student/chatbot"
+    element={<Chatbot />}
+  />
       </Route>
     </Routes>
   );
