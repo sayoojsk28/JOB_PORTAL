@@ -52,63 +52,7 @@ export default function StudentDashboard() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-slate-50">
-      <header className="border-b border-slate-200 bg-white/90">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8">
-          <div>
-            <h1 className="text-xl font-bold text-blue-700 sm:text-2xl">
-              Job Portal
-            </h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Student Dashboard
-            </p>
-          </div>
-
-          <div className="relative flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setShowNotifications(!showNotifications)}
-              className="relative rounded-xl border border-slate-200 p-3 text-slate-600 transition hover:bg-blue-50"
-              aria-label="Notifications"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className="h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-                <path d="M10 21h4" />
-              </svg>
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-blue-600" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigate('/profile')}
-              className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 font-bold text-white shadow-sm"
-              aria-label="My profile"
-              title="My profile"
-            >
-              S
-            </button>
-
-            {showNotifications && (
-              <div className="absolute right-0 top-14 z-10 w-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
-                <h3 className="font-semibold text-slate-800">
-                  Notifications
-                </h3>
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  You will see interview updates and application notifications
-                  here when this feature is connected.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
+      
 
       <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-10">
         <section className="mb-8 rounded-3xl bg-gradient-to-r from-blue-700 to-indigo-700 p-6 text-white shadow-lg sm:p-8">

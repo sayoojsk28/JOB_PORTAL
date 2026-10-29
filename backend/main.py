@@ -20,6 +20,11 @@ from schemas import (
     JobCreate, 
     JobResponse,
     AdminChangePassword,
+    CompanyCreate, 
+    CompanyResponse,
+    VacancyCreate,
+    VacancyResponse,
+    ApplicationCreate,
 )
 import os
 import uuid
@@ -29,6 +34,7 @@ from chatbot.rag_service import answer_question
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 from fastapi.staticfiles import StaticFiles
+from fastapi import Body
 
 import jwt
 os.makedirs("uploads/employee_photos", exist_ok=True)
@@ -39,8 +45,11 @@ app = FastAPI(title="Job Portal API")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
+COMPANY_LOGOS_DIR = os.path.join(UPLOADS_DIR, "company_logos")
+os.makedirs(COMPANY_LOGOS_DIR, exist_ok=True)
 
 os.makedirs(os.path.join(UPLOADS_DIR, "employee_photos"), exist_ok=True)
+os.makedirs(os.path.join(UPLOADS_DIR, "resumes"), exist_ok=True)
 
 app.mount(
     "/uploads",
@@ -65,6 +74,8 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
 
 Base.metadata.create_all(bind=engine)
 
@@ -714,6 +725,449 @@ def ask_chatbot(
     current_user=Depends(require_student),
 ):
     return answer_question(payload.question)
+
+
+
+@app.post("/companies", response_model=CompanyResponse, status_code=201)
+def create_company(
+    name: str = Form(...),
+    industry: str = Form(...),
+    address: str = Form(...),
+    contact_number: str = Form(...),
+    email: EmailStr = Form(...),
+    website: str | None = Form(None),
+    size: str | None = Form(None),
+    description: str | None = Form(None),
+    logo: UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not isinstance(current_user, models.Employee):
+        raise HTTPException(
+            status_code=403,
+            detail="Only employees can register companies",
+        )
+
+    logo_path = None
+
+    if logo and logo.filename:
+        allowed_types = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp",
+        }
+
+        extension = allowed_types.get(logo.content_type)
+
+        if not extension:
+            raise HTTPException(
+                status_code=400,
+                detail="Only JPG, PNG and WEBP images are allowed",
+            )
+
+        filename = f"{uuid.uuid4().hex}{extension}"
+        file_path = os.path.join(COMPANY_LOGOS_DIR, filename)
+
+        try:
+            with open(file_path, "wb") as file:
+                file.write(logo.file.read())
+
+            logo_path = f"/uploads/company_logos/{filename}"
+        finally:
+            logo.file.close()
+
+    new_company = models.Company(
+        name=name,
+        industry=industry,
+        address=address,
+        website=website,
+        contact_number=contact_number,
+        email=str(email),
+        size=size,
+        description=description,
+        logo=logo_path,
+    )
+
+    db.add(new_company)
+
+    try:
+        db.commit()
+        db.refresh(new_company)
+    except Exception:
+        db.rollback()
+
+        if logo_path:
+            saved_file = os.path.join(
+                COMPANY_LOGOS_DIR,
+                os.path.basename(logo_path),
+            )
+            if os.path.exists(saved_file):
+                os.remove(saved_file)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Could not register company",
+        )
+
+    return new_company
+
+@app.get("/companies", response_model=list[CompanyResponse])
+def get_companies(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not isinstance(current_user, models.Employee):
+        raise HTTPException(
+            status_code=403,
+            detail="Only employees can view companies",
+        )
+
+    companies = (
+        db.query(models.Company)
+        .order_by(models.Company.created_at.desc())
+        .all()
+    )
+
+    return companies
+
+
+@app.patch("/companies/{company_id}/status", response_model=CompanyResponse)
+def update_company_status(
+    company_id: int,
+    status: str = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not isinstance(current_user, models.Employee):
+        raise HTTPException(
+            status_code=403,
+            detail="Only employees can update company status",
+        )
+
+    allowed_statuses = {"waiting", "accepted", "rejected"}
+
+    if status not in allowed_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail="Status must be waiting, accepted or rejected",
+        )
+
+    company = db.query(models.Company).filter(
+        models.Company.id == company_id
+    ).first()
+
+    if not company:
+        raise HTTPException(
+            status_code=404,
+            detail="Company not found",
+        )
+
+    company.is_active = status
+    db.commit()
+    db.refresh(company)
+
+    return company
+
+@app.post(
+    "/vacancies",
+    response_model=VacancyResponse,
+    status_code=201,
+)
+def create_vacancy(
+    vacancy: VacancyCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    # Only employees can post vacancies
+    if not isinstance(current_user, models.Employee):
+        raise HTTPException(
+            status_code=403,
+            detail="Only employees can post vacancies",
+        )
+
+    # Check whether the company exists
+    company = db.query(models.Company).filter(
+        models.Company.id == vacancy.company_id
+    ).first()
+
+    if not company:
+        raise HTTPException(
+            status_code=404,
+            detail="Company not found",
+        )
+
+    # Only accepted companies can have vacancies
+    if company.is_active != "accepted":
+        raise HTTPException(
+            status_code=400,
+            detail="Vacancies can only be posted for accepted companies",
+        )
+
+    # Save the vacancy
+    new_vacancy = models.Vacancy(
+        **vacancy.model_dump(),
+        created_by=current_user.id,
+    )
+
+    db.add(new_vacancy)
+    db.commit()
+    db.refresh(new_vacancy)
+
+    return new_vacancy
+
+@app.get("/vacancies", response_model=list[VacancyResponse])
+def get_vacancies(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not isinstance(current_user, models.Employee):
+        raise HTTPException(
+            status_code=403,
+            detail="Only employees can view vacancies",
+        )
+
+    vacancies = (
+        db.query(models.Vacancy)
+        .order_by(models.Vacancy.created_at.desc())
+        .all()
+    )
+
+    return vacancies
+
+
+@app.get("/student/vacancies", response_model=list[VacancyResponse])
+def get_student_vacancies(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not isinstance(current_user, models.Student):
+        raise HTTPException(
+            status_code=403,
+            detail="Only students can view vacancies",
+        )
+
+    vacancies = (
+        db.query(models.Vacancy)
+        .order_by(models.Vacancy.created_at.desc())
+        .all()
+    )
+
+    return vacancies
+
+
+@app.post("/student/resumes/upload")
+def upload_student_resume(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    # 1. Allow PDF files only
+    if file.content_type != "application/pdf":
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are allowed",
+        )
+
+    # 2. Generate a unique filename
+    filename = f"{uuid.uuid4()}.pdf"
+    file_path = os.path.join(UPLOADS_DIR, "resumes", filename)
+
+    # 3. Read and validate the file
+    file_content = file.file.read()
+
+    if not file_content:
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded file is empty",
+        )
+
+    # 4. Save the file
+    with open(file_path, "wb") as f:
+        f.write(file_content)
+
+    # 5. Save file details in the database
+    new_resume = models.Resume(
+        student_id=student.id,
+        file_type="application/pdf",
+        file_size=len(file_content),
+        file_path=f"resumes/{filename}",
+        is_active="active",
+    )
+
+    try:
+        db.add(new_resume)
+        db.commit()
+        db.refresh(new_resume)
+    except Exception:
+        db.rollback()
+
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to save resume details",
+        )
+
+    return {
+        "message": "Resume uploaded successfully",
+        "resume_id": new_resume.resume_id,
+        "file_name": filename,
+        "file_size": new_resume.file_size,
+        "status": new_resume.is_active,
+    }
+
+
+@app.post("/student/applications")
+def submit_application(
+    application: ApplicationCreate,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    # 1. Check whether the vacancy exists and is open
+    vacancy = (
+        db.query(models.Vacancy)
+        .filter(
+            models.Vacancy.id == application.vacancy_id,
+            models.Vacancy.status == "Open",
+        )
+        .first()
+    )
+
+    if not vacancy:
+        raise HTTPException(
+            status_code=404,
+            detail="Open vacancy not found",
+        )
+
+    # 2. Check whether the resume belongs to this student
+    resume = (
+        db.query(models.Resume)
+        .filter(
+            models.Resume.resume_id == application.resume_id,
+            models.Resume.student_id == student.id,
+            models.Resume.is_active == "active",
+        )
+        .first()
+    )
+
+    if not resume:
+        raise HTTPException(
+            status_code=404,
+            detail="Active resume not found for this student",
+        )
+
+    # 3. Create the application
+    new_application = models.Application(
+        student_id=student.id,
+        vacancy_id=vacancy.id,
+        resume_id=resume.resume_id,
+        status="Not Sent",
+    )
+
+    db.add(new_application)
+    db.commit()
+    db.refresh(new_application)
+
+    return {
+        "message": "Application submitted successfully",
+        "application_id": new_application.application_id,
+        "vacancy_id": new_application.vacancy_id,
+        "resume_id": new_application.resume_id,
+        "status": new_application.status,
+    }
+
+
+@app.get("/employee/applications")
+def get_all_applications(
+    db: Session = Depends(get_db),
+    employee: models.Employee = Depends(require_employee),
+):
+    applications = (
+        db.query(models.Application)
+        .order_by(models.Application.applied_at.desc())
+        .all()
+    )
+
+    result = []
+
+    for application in applications:
+        student = db.query(models.Student).filter(
+            models.Student.id == application.student_id
+        ).first()
+
+        vacancy = db.query(models.Vacancy).filter(
+            models.Vacancy.id == application.vacancy_id
+        ).first()
+
+        resume = db.query(models.Resume).filter(
+            models.Resume.resume_id == application.resume_id
+        ).first()
+
+        company = None
+
+        if vacancy:
+            company = db.query(models.Company).filter(
+                models.Company.id == vacancy.company_id
+            ).first()
+
+        result.append({
+            "application_id": application.application_id,
+            "student_id": application.student_id,
+            "student_name": student.full_name if student else None,
+            "student_email": student.email if student else None,
+            "vacancy_id": application.vacancy_id,
+            "vacancy_title": vacancy.title if vacancy else None,
+            "company_name": company.name if company else None,
+            "resume_id": resume.resume_id if resume else None,
+            "resume_url": (
+                f"/uploads/{resume.file_path}"
+                if resume else None
+            ),
+            "status": application.status,
+            "applied_at": application.applied_at,
+        })
+
+    return result
+
+
+class ApplicationStatusUpdate(BaseModel):
+    status: str
+
+
+@app.patch("/employee/applications/{application_id}/status")
+def update_application_status(
+    application_id: int,
+    data: ApplicationStatusUpdate,
+    db: Session = Depends(get_db),
+    employee: models.Employee = Depends(require_employee),
+):
+    if data.status != "Sent":
+        raise HTTPException(
+            status_code=400,
+            detail="Only the Sent status is allowed",
+        )
+
+    application = db.query(models.Application).filter(
+        models.Application.application_id == application_id
+    ).first()
+
+    if not application:
+        raise HTTPException(
+            status_code=404,
+            detail="Application not found",
+        )
+
+    application.status = "Sent"
+    db.commit()
+    db.refresh(application)
+
+    return {
+        "message": "Application status updated successfully",
+        "application_id": application.application_id,
+        "status": application.status,
+    }
+
 
 
 

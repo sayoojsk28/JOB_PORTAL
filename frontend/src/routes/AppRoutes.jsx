@@ -17,7 +17,14 @@ import ViewEmployees from '../pages/Dashboard/ViewEmployees';
 import ChangePassword from '../pages/Dashboard/ChangePassword';
 import StudentRegistrationSuccess from '../pages/student/StudentRegistrationSuccess';
 import Chatbot from '../pages/student/Chatbot';
-
+import PostCompanies from '../pages/employee/PostCompanies';
+import ViewCompanies from '../pages/employee/ViewCompanies';
+import Dashboard from '../pages/employee/Dashboard';
+import PostVacancies from '../pages/employee/PostVacancies';
+import ViewVacancies from '../pages/employee/ViewVacancies';
+import ViewVacanciesSt from '../pages/student/ViewVacanciesSt';
+import UploadResume from '../pages/student/UploadResume';
+import ViewApplication from '../pages/employee/ViewApplications';
 const AppRoutes = () => {
   return (
     <Routes>
@@ -70,7 +77,43 @@ const AppRoutes = () => {
     path="/student/chatbot"
     element={<Chatbot />}
   />
+  <Route
+  path="/student/vacancies"
+  element={<ViewVacanciesSt />}
+/>
+<Route
+  path="/student/upload-resume/:vacancyId"
+  element={<UploadResume />}
+/>
       </Route>
+      <Route
+  path="/employee/companies/create"
+  element={<PostCompanies />}
+/>
+<Route
+  path="/employee/companies"
+  element={<ViewCompanies />}
+/>
+<Route
+  path="/employee/dashboard"
+  element={<Dashboard />}
+/>
+<Route element={<ProtectedRoute allowedRoles={['employee']} />}>
+  <Route path="/employee/dashboard" element={<RecruiterDashboard />} />
+  <Route path="/employee/jobs/create" element={<CreateJob />} />
+</Route>
+<Route
+  path="/employee/companies/:companyId/vacancies/create"
+  element={<PostVacancies />}
+/>
+<Route
+  path="/employee/vacancies"
+  element={<ViewVacancies />}
+/>
+<Route
+  path="/employee/applications"
+  element={<ViewApplication />}
+/>
     </Routes>
   );
 };
