@@ -7,11 +7,11 @@ import Register from '../pages/Register';
 import Profile from '../pages/Profile';
 import ProtectedRoute from '../components/ProtectedRoute';
 import AdminDashboard from '../pages/Dashboard/AdminDashboard';
-import RecruiterDashboard from '../pages/Dashboard/RecruiterDashboard';
+// import RecruiterDashboard from '../pages/Dashboard/RecruiterDashboard';
 import StudentDashboard from '../pages/student/StudentDashboard';
-import JobList from '../pages/Jobs/JobList';
-import JobDetails from '../pages/Jobs/JobDetails';
-import CreateJob from '../pages/Jobs/CreateJob';
+// import JobList from '../pages/Jobs/JobList';
+// import JobDetails from '../pages/Jobs/JobDetails';
+// import CreateJob from '../pages/Jobs/CreateJob';
 import PendingEmployees from '../pages/Dashboard/PendingEmployees';
 import ViewEmployees from '../pages/Dashboard/ViewEmployees';
 import ChangePassword from '../pages/Dashboard/ChangePassword';
@@ -31,6 +31,8 @@ import ViewConfirmedInterview from '../pages/student/ViewConfirmedInterview';
 import PostResult from '../pages/employee/PostResults';
 import PublishResult from '../pages/employee/PublishResults';
 import ViewInterviewResults from '../pages/student/ViewInterviewResults';
+import ViewAcceptedCompanies from '../pages/employee/ViewAcceptedCompanies';
+
 const AppRoutes = () => {
   return (
     <Routes>
@@ -40,8 +42,8 @@ const AppRoutes = () => {
 	<Route path="/login/:role" element={<Login />} />
 	<Route path="/register" element={<Register />} />
 	<Route path="/register/:role" element={<Register />} />
-	<Route path="/jobs" element={<JobList />} />
-	<Route path="/jobs/:id" element={<JobDetails />} />
+	{/* <Route path="/jobs" element={<JobList />} />
+	<Route path="/jobs/:id" element={<JobDetails />} /> */}
   <Route
       path="/student/registration-success"
       element={<StudentRegistrationSuccess />}
@@ -70,8 +72,8 @@ const AppRoutes = () => {
 </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['employee']} />}>
-        <Route path="/employee/dashboard" element={<RecruiterDashboard />} />
-        <Route path="/employee/jobs/create" element={<CreateJob />} />
+        {/* <Route path="/employee/dashboard" element={<RecruiterDashboard />} /> */}
+        {/* <Route path="/employee/jobs/create" element={<CreateJob />} /> */}
       </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['student']} />}>
@@ -108,14 +110,10 @@ const AppRoutes = () => {
   path="/employee/companies"
   element={<ViewCompanies />}
 />
-<Route
-  path="/employee/dashboard"
-  element={<Dashboard />}
-/>
 <Route element={<ProtectedRoute allowedRoles={['employee']} />}>
-  <Route path="/employee/dashboard" element={<RecruiterDashboard />} />
-  <Route path="/employee/jobs/create" element={<CreateJob />} />
+  <Route path="/employee/dashboard" element={<Dashboard />} />
 </Route>
+
 <Route
   path="/employee/companies/:companyId/vacancies/create"
   element={<PostVacancies />}
@@ -138,6 +136,7 @@ const AppRoutes = () => {
   path="/employee/interview-results"
   element={<PublishResult />}
 />
+<Route path="/employee/accepted-companies" element={<ViewAcceptedCompanies />} />
 
     </Routes>
   );

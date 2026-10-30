@@ -4,25 +4,28 @@ import { useNavigate } from 'react-router-dom';
 
 const dashboardCards = [
   {
-    title: 'Jobs & Applications',
-    description: 'Explore job opportunities and apply for suitable positions.',
-    icon: '💼',
-  },
+  title: 'Jobs & Applications',
+  description: 'Explore job opportunities and apply for suitable positions.',
+  icon: '💼',
+  path: '/student/vacancies',
+},
   {
-    title: 'Confirmed Interviews',
-    description: 'View your scheduled interviews, dates and meeting links.',
-    icon: '📅',
-  },
+  title: 'Confirmed Interviews',
+  description: 'View your scheduled interviews, dates and meeting links.',
+  icon: '📅',
+  path: '/student/interviews',
+},
   {
     title: 'Applied Jobs History',
     description: 'Keep track of the jobs you have applied for.',
     icon: '📋',
   },
   {
-    title: 'Interview History & Results',
-    description: 'Review completed interviews and published results.',
-    icon: '🏆',
-  },
+  title: 'Interview History & Results',
+  description: 'Review completed interviews and published results.',
+  icon: '🏆',
+  path: '/student/interview-results',
+},
   {
     title: 'My Profile & Resume',
     description: 'Manage your personal details, profile photo and resume.',
@@ -34,11 +37,11 @@ const dashboardCards = [
     icon: '🔐',
   },
   {
-    title: 'Job Portal AI Assistant',
-    description: 'Get help and answers about using the job portal.',
-    icon: '🤖',
-	path: '/student/chatbot',
-  },
+  title: 'Job Portal AI Assistant',
+  description: 'Get help and answers about using the job portal.',
+  icon: '🤖',
+  path: '/student/chatbot',
+},
   {
     title: 'Feedback to Admin',
     description: 'Share your suggestions, feedback or concerns.',
