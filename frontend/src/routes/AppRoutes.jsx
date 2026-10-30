@@ -25,6 +25,12 @@ import ViewVacancies from '../pages/employee/ViewVacancies';
 import ViewVacanciesSt from '../pages/student/ViewVacanciesSt';
 import UploadResume from '../pages/student/UploadResume';
 import ViewApplication from '../pages/employee/ViewApplications';
+import PostInterview from "../pages/employee/PostInterview";
+import ViewInterview from "../pages/employee/ViewInterview";
+import ViewConfirmedInterview from '../pages/student/ViewConfirmedInterview';
+import PostResult from '../pages/employee/PostResults';
+import PublishResult from '../pages/employee/PublishResults';
+import ViewInterviewResults from '../pages/student/ViewInterviewResults';
 const AppRoutes = () => {
   return (
     <Routes>
@@ -85,6 +91,14 @@ const AppRoutes = () => {
   path="/student/upload-resume/:vacancyId"
   element={<UploadResume />}
 />
+<Route
+  path="/student/interviews"
+  element={<ViewConfirmedInterview />}
+/>
+<Route
+  path="/student/interview-results"
+  element={<ViewInterviewResults />}
+/>
       </Route>
       <Route
   path="/employee/companies/create"
@@ -114,6 +128,17 @@ const AppRoutes = () => {
   path="/employee/applications"
   element={<ViewApplication />}
 />
+<Route path="/employee/post-interview" element={<PostInterview />} />
+<Route path="/employee/interviews" element={<ViewInterview />} />
+<Route
+  path="/employee/post-result"
+  element={<PostResult />}
+/>
+<Route
+  path="/employee/interview-results"
+  element={<PublishResult />}
+/>
+
     </Routes>
   );
 };

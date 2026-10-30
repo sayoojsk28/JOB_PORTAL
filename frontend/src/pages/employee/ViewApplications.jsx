@@ -1,8 +1,10 @@
 
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 
 function ViewApplication() {
+  const navigate = useNavigate();
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -339,6 +341,19 @@ function ViewApplication() {
                             </>
                           )}
                         </button>
+                        <button
+  type="button"
+  onClick={() =>
+    navigate('/employee/post-interview', {
+      state: {
+        application_id: application.application_id,
+      },
+    })
+  }
+  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-purple-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-purple-800"
+>
+  Post Interview Details
+</button>
                       </div>
                     </div>
                   </article>

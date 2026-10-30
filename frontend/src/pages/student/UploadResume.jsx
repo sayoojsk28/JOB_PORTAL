@@ -22,6 +22,7 @@ function UploadResume() {
   const [numPages, setNumPages] = useState(null);
   const [previewError, setPreviewError] = useState('');
   const navigate = useNavigate();
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     const fetchVacancy = async () => {
@@ -55,6 +56,48 @@ function UploadResume() {
 
     fetchVacancy();
   }, [vacancyId]);
+
+  const handleSendResume = async () => {
+  if (!resumeFile) return;
+
+  try {
+    setSending(true);
+
+    // 1. Upload resume
+    const formData = new FormData();
+    formData.append('file', resumeFile);
+
+    const uploadResponse = await api.post(
+      '/student/resumes/upload',
+      formData
+    );
+
+    // 2. Get uploaded resume ID
+    const resumeId = uploadResponse.data.resume_id;
+
+    // 3. Create job application
+    await api.post('/student/applications', {
+      vacancy_id: Number(vacancyId),
+      resume_id: resumeId,
+    });
+
+    // 4. Show success message
+    window.alert('Application submitted successfully!');
+
+    navigate('/student/vacancies');
+
+  } catch (err) {
+    console.error('Application submission error:', err);
+
+    window.alert(
+      err.response?.data?.detail ||
+      'Unable to submit application. Please try again.'
+    );
+
+  } finally {
+    setSending(false);
+  }
+};
 
   if (loading) {
     return <div className="p-8 text-center">Loading job details...</div>;
@@ -251,16 +294,13 @@ return (
       )}
 
       <button
-        type="button"
-        disabled={!resumeFile || !numPages || !!previewError}
-        onClick={() => {
-          window.alert('Resume sent!');
-          navigate('/student/vacancies');
-        }}
-        className="mt-4 w-full rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
-      >
-        Send resume
-      </button>
+  type="button"
+  disabled={!resumeFile || !numPages || !!previewError || sending}
+  onClick={handleSendResume}
+  className="mt-4 w-full rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+>
+  {sending ? 'Sending...' : 'Send resume'}
+</button>
 
       <p className="mt-3 text-center text-xs leading-5 text-slate-400">
         Review your resume before sending.

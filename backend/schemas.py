@@ -1,5 +1,6 @@
 
-from datetime import date ,datetime
+from datetime import date ,datetime , time 
+from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
@@ -159,3 +160,64 @@ class ApplicationCreate(BaseModel):
     vacancy_id: int
     resume_id: int
 
+class InterviewCreate(BaseModel):
+    application_id: int
+    interview_date: date
+    interview_time: time
+    mode: str
+    meeting_link_or_venue: str
+    notes: Optional[str] = None
+
+
+class InterviewResponse(BaseModel):
+    interview_id: int
+    application_id: int
+    interview_date: date
+    interview_time: time
+    mode: str
+    meeting_link_or_venue: str
+    status: str
+    student_attendance: str
+    notes: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    created_by: int
+
+
+class InterviewStatusUpdate(BaseModel):
+    status: str
+
+class InterviewAttendanceUpdate(BaseModel):
+    student_attendance: str
+
+class InterviewResultCreate(BaseModel):
+    interview_id: int
+    result: str
+    score: Optional[float] = None
+    feedback: Optional[str] = None
+
+
+class InterviewResultResponse(BaseModel):
+    result_id: int
+    interview_id: int
+    result: str
+    score: Optional[float] = None
+    feedback: Optional[str] = None
+    published_on: Optional[datetime] = None
+    is_published: bool
+    created_at: datetime
+
+
+class InterviewResultPublish(BaseModel):
+    is_published: bool
+
+class StudentInterviewResultResponse(BaseModel):
+    result_id: int
+    interview_id: int
+    interview_date: date
+    interview_time: time
+    mode: str
+    result: str
+    score: Optional[float] = None
+    feedback: Optional[str] = None
+    published_on: Optional[datetime] = None

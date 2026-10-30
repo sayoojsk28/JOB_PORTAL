@@ -1,5 +1,5 @@
 
-from sqlalchemy import Column, Integer, String, Date , Text,BigInteger, ForeignKey, DateTime, func
+from sqlalchemy import Column, Integer, String, Date , Text,BigInteger, ForeignKey, DateTime, func,Boolean,Time,Float
 from sqlalchemy import text
 from database import Base
 
@@ -215,3 +215,115 @@ class Application(Base):
         server_default=func.now(),
     )
 
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    notification_id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
+    application_id = Column(
+        Integer,
+        ForeignKey("applications.application_id"),
+        nullable=False
+    )
+    message = Column(String(500), nullable=False)
+    is_read = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+class Interview(Base):
+    __tablename__ = "interviews"
+
+    interview_id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    application_id = Column(
+        Integer,
+        ForeignKey("applications.application_id"),
+        nullable=False,
+        index=True
+    )
+
+    interview_date = Column(Date, nullable=False)
+
+    interview_time = Column(Time, nullable=False)
+
+    mode = Column(
+        String(20),
+        nullable=False
+    )
+
+    meeting_link_or_venue = Column(
+        String(500),
+        nullable=False
+    )
+
+    status = Column(
+        String(30),
+        nullable=False,
+        default="Scheduled",
+        server_default=text("'Scheduled'")
+    )
+
+    student_attendance = Column(
+        String(30),
+        nullable=False,
+        default="Waiting",
+        server_default=text("'Waiting'")
+    )
+
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+    created_by = Column(
+        Integer,
+        ForeignKey("employees.id"),
+        nullable=False
+    )
+
+class InterviewResult(Base):
+    __tablename__ = "interview_results"
+
+    result_id = Column(Integer, primary_key=True, index=True)
+
+    interview_id = Column(
+        Integer,
+        ForeignKey("interviews.interview_id"),
+        nullable=False,
+        unique=True,
+        index=True
+    )
+
+    result = Column(String(30), nullable=False)
+
+    score = Column(Float, nullable=True)
+
+    feedback = Column(Text, nullable=True)
+
+    published_on = Column(DateTime(timezone=True), nullable=True)
+
+    is_published = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false")
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )

@@ -25,6 +25,12 @@ from schemas import (
     VacancyCreate,
     VacancyResponse,
     ApplicationCreate,
+    InterviewCreate,
+    InterviewResponse,
+    InterviewAttendanceUpdate,
+    InterviewResultResponse,
+    InterviewResultCreate,
+    StudentInterviewResultResponse
 )
 import os
 import uuid
@@ -1158,7 +1164,41 @@ def update_application_status(
             detail="Application not found",
         )
 
+    if application.status == "Sent":
+        raise HTTPException(
+            status_code=400,
+            detail="Application is already marked as Sent",
+        )
+
+    vacancy = db.query(models.Vacancy).filter(
+        models.Vacancy.id == application.vacancy_id
+    ).first()
+
+    if not vacancy:
+        raise HTTPException(
+            status_code=404,
+            detail="Vacancy not found",
+        )
+
+    company = db.query(models.Company).filter(
+        models.Company.id == vacancy.company_id
+    ).first()
+
+    if not company:
+        raise HTTPException(
+            status_code=404,
+            detail="Company not found",
+        )
+
     application.status = "Sent"
+
+    notification = models.Notification(
+        student_id=application.student_id,
+        application_id=application.application_id,
+        message=f"Your resume is sent to {company.name} for {vacancy.title} job role."
+    )
+
+    db.add(notification)
     db.commit()
     db.refresh(application)
 
@@ -1168,9 +1208,354 @@ def update_application_status(
         "status": application.status,
     }
 
+@app.get("/student/notifications")
+def get_student_notifications(
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    notifications = (
+        db.query(models.Notification)
+        .filter(models.Notification.student_id == student.id)
+        .order_by(models.Notification.created_at.desc())
+        .all()
+    )
 
+    return [
+        {
+            "notification_id": item.notification_id,
+            "message": item.message,
+            "is_read": item.is_read,
+            "created_at": item.created_at,
+        }
+        for item in notifications
+    ]
 
+@app.patch("/student/notifications/read")
+def mark_notifications_as_read(
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    updated_count = (
+        db.query(models.Notification)
+        .filter(
+            models.Notification.student_id == student.id,
+            models.Notification.is_read == False
+        )
+        .update(
+            {models.Notification.is_read: True},
+            synchronize_session=False
+        )
+    )
 
+    db.commit()
+
+    return {
+        "message": "Notifications marked as read",
+        "updated_count": updated_count
+    }
+
+@app.post("/employee/interviews", response_model=InterviewResponse)
+def create_interview(
+    data: InterviewCreate,
+    db: Session = Depends(get_db),
+    employee: models.Employee = Depends(require_employee),
+):
+    application = db.query(models.Application).filter(
+        models.Application.application_id == data.application_id
+    ).first()
+
+    if not application:
+        raise HTTPException(
+            status_code=404,
+            detail="Application not found"
+        )
+
+    interview = models.Interview(
+        application_id=data.application_id,
+        interview_date=data.interview_date,
+        interview_time=data.interview_time,
+        mode=data.mode,
+        meeting_link_or_venue=data.meeting_link_or_venue,
+        notes=data.notes,
+        created_by=employee.id
+    )
+
+    db.add(interview)
+    notification = models.Notification(
+    student_id=application.student_id,
+    application_id=application.application_id,
+    message=(
+        f"An interview has been scheduled for your application. "
+        f"Date: {data.interview_date}, "
+        f"Time: {data.interview_time}, "
+        f"Mode: {data.mode}."
+    )
+)
+
+    db.add(notification)
+    db.commit()
+    db.refresh(interview)
+
+    return interview
+
+@app.get(
+    "/employee/interviews",
+    response_model=list[InterviewResponse]
+)
+def get_employee_interviews(
+    db: Session = Depends(get_db),
+    employee: models.Employee = Depends(require_employee),
+):
+    interviews = (
+        db.query(models.Interview)
+        .filter(models.Interview.created_by == employee.id)
+        .order_by(models.Interview.created_at.desc())
+        .all()
+    )
+
+    return interviews
+
+@app.get("/student/interviews")
+def get_student_interviews(
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    interviews = (
+        db.query(models.Interview)
+        .join(
+            models.Application,
+            models.Interview.application_id
+            == models.Application.application_id
+        )
+        .filter(
+            models.Application.student_id == student.id,
+            models.Interview.student_attendance == "Waiting"
+        )
+        .order_by(models.Interview.interview_date.asc())
+        .all()
+    )
+
+    return [
+        {
+            "interview_id": interview.interview_id,
+            "application_id": interview.application_id,
+            "interview_date": interview.interview_date,
+            "interview_time": interview.interview_time,
+            "mode": interview.mode,
+            "meeting_link_or_venue": interview.meeting_link_or_venue,
+            "status": interview.status,
+            "student_attendance": interview.student_attendance,
+            "notes": interview.notes,
+        }
+        for interview in interviews
+    ]
+
+@app.patch("/student/interviews/{interview_id}/attendance")
+def update_student_attendance(
+    interview_id: int,
+    data: InterviewAttendanceUpdate,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    interview = (
+        db.query(models.Interview)
+        .join(
+            models.Application,
+            models.Interview.application_id
+            == models.Application.application_id
+        )
+        .filter(
+            models.Interview.interview_id == interview_id,
+            models.Application.student_id == student.id
+        )
+        .first()
+    )
+
+    if not interview:
+        raise HTTPException(
+            status_code=404,
+            detail="Interview not found"
+        )
+
+    interview.student_attendance = data.student_attendance
+
+    db.commit()
+    db.refresh(interview)
+
+    return {
+        "message": "Attendance updated successfully",
+        "interview_id": interview.interview_id,
+        "student_attendance": interview.student_attendance
+    }
+
+@app.post(
+    "/employee/interview-results",
+    response_model=InterviewResultResponse
+)
+def create_interview_result(
+    data: InterviewResultCreate,
+    db: Session = Depends(get_db),
+    employee: models.Employee = Depends(require_employee),
+):
+    interview = db.query(models.Interview).filter(
+        models.Interview.interview_id == data.interview_id
+    ).first()
+
+    if not interview:
+        raise HTTPException(
+            status_code=404,
+            detail="Interview not found"
+        )
+
+    existing_result = db.query(models.InterviewResult).filter(
+        models.InterviewResult.interview_id == data.interview_id
+    ).first()
+
+    if existing_result:
+        raise HTTPException(
+            status_code=400,
+            detail="Result already exists for this interview"
+        )
+
+    if data.result not in ["Selected", "Rejected", "On Hold"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid result. Choose Selected, Rejected, or On Hold"
+        )
+
+    interview_result = models.InterviewResult(
+        interview_id=data.interview_id,
+        result=data.result,
+        score=data.score,
+        feedback=data.feedback
+    )
+
+    db.add(interview_result)
+    db.commit()
+    db.refresh(interview_result)
+
+    return interview_result
+
+@app.get(
+    "/employee/interview-results",
+    response_model=list[InterviewResultResponse]
+)
+def get_employee_interview_results(
+    db: Session = Depends(get_db),
+    employee: models.Employee = Depends(require_employee),
+):
+    results = (
+        db.query(models.InterviewResult)
+        .join(
+            models.Interview,
+            models.InterviewResult.interview_id
+            == models.Interview.interview_id
+        )
+        .filter(
+            models.Interview.created_by == employee.id
+        )
+        .order_by(models.InterviewResult.created_at.desc())
+        .all()
+    )
+
+    return results
+
+@app.patch("/employee/interview-results/{result_id}/publish")
+def publish_interview_result(
+    result_id: int,
+    db: Session = Depends(get_db),
+    employee: models.Employee = Depends(require_employee),
+):
+    interview_result = db.query(models.InterviewResult).filter(
+        models.InterviewResult.result_id == result_id
+    ).first()
+
+    if not interview_result:
+        raise HTTPException(
+            status_code=404,
+            detail="Interview result not found"
+        )
+
+    interview_result.is_published = True
+    interview_result.published_on = datetime.now(timezone.utc)
+
+    interview = db.query(models.Interview).filter(
+    models.Interview.interview_id == interview_result.interview_id
+).first()
+
+    application = db.query(models.Application).filter(
+    models.Application.application_id == interview.application_id
+).first()
+
+    notification = models.Notification(
+    student_id=application.student_id,
+    application_id=application.application_id,
+    message=(
+        f"Your interview result has been published. "
+        f"Result: {interview_result.result}. "
+        f"Please check your Interview Results page."
+    )
+)
+
+    db.add(notification)
+
+    db.commit()
+    db.refresh(interview_result)
+
+    return {
+        "message": "Interview result published successfully",
+        "result_id": interview_result.result_id,
+        "is_published": interview_result.is_published,
+        "published_on": interview_result.published_on
+    }
+
+@app.get(
+    "/student/interview-results",
+    response_model=list[StudentInterviewResultResponse]
+)
+def get_student_interview_results(
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    results = (
+        db.query(
+            models.InterviewResult,
+            models.Interview
+        )
+        .join(
+            models.Interview,
+            models.InterviewResult.interview_id
+            == models.Interview.interview_id
+        )
+        .join(
+            models.Application,
+            models.Interview.application_id
+            == models.Application.application_id
+        )
+        .filter(
+            models.Application.student_id == student.id,
+            models.InterviewResult.is_published == True
+        )
+        .order_by(
+            models.InterviewResult.published_on.desc()
+        )
+        .all()
+    )
+
+    return [
+        {
+            "result_id": result.result_id,
+            "interview_id": interview.interview_id,
+            "interview_date": interview.interview_date,
+            "interview_time": interview.interview_time,
+            "mode": interview.mode,
+            "result": result.result,
+            "score": result.score,
+            "feedback": result.feedback,
+            "published_on": result.published_on,
+        }
+        for result, interview in results
+    ]
 
 
 
