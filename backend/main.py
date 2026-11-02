@@ -81,7 +81,25 @@ def get_db():
     finally:
         db.close()
 
+def log_action(
+    db: Session,
+    user_id: int | None,
+    action: str,
+    target_type: str | None = None,
+    target_id: int | None = None,
+    details: str | None = None,
+    ip_address: str | None = None,
+):
+    audit_log = models.AuditLog(
+        user_id=user_id,
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        details=details,
+        ip_address=ip_address,
+    )
 
+    db.add(audit_log)
 
 Base.metadata.create_all(bind=engine)
 
@@ -315,6 +333,21 @@ def create_default_admin():
 class ChatbotQuestion(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
 
+# @app.post("/test-audit-log")
+# def test_audit_log(db: Session = Depends(get_db)):
+#     log_action(
+#         db=db,
+#         user_id=1,
+#         action="TEST_AUDIT_LOG",
+#         target_type="system",
+#         target_id=1,
+#         details="Testing audit log insertion",
+#     )
+
+#     db.commit()
+
+#     return {"message": "Audit log created successfully"}
+
 create_default_admin()
 
 
@@ -489,6 +522,7 @@ def register_employee(
 
 @app.post("/auth/admin/login", response_model=LoginResponse)
 def admin_login(login_data: LoginRequest, db: Session = Depends(get_db)):
+
     user = (
         db.query(models.User)
         .filter(
@@ -498,19 +532,55 @@ def admin_login(login_data: LoginRequest, db: Session = Depends(get_db)):
         .first()
     )
 
+    # Failed login
     if not user or not password_hash.verify(
         login_data.password, user.password_hash
     ):
+        log_action(
+            db=db,
+            user_id=user.user_id if user else None,
+            action="LOGIN_FAILED",
+            target_type="user",
+            target_id=user.user_id if user else None,
+            details="Admin login failed: Invalid credentials",
+        )
+        db.commit()
+
         raise HTTPException(
             status_code=401,
             detail="Invalid email or password"
         )
 
+    # Inactive account
     if not user.is_active:
+        log_action(
+            db=db,
+            user_id=user.user_id,
+            action="LOGIN_BLOCKED",
+            target_type="user",
+            target_id=user.user_id,
+            details="Admin login blocked: Account inactive",
+        )
+        db.commit()
+
         raise HTTPException(
             status_code=403,
             detail="Admin account is inactive"
         )
+
+    # Successful login
+    user.last_login = datetime.now(timezone.utc)
+
+    log_action(
+        db=db,
+        user_id=user.user_id,
+        action="LOGIN_SUCCESS",
+        target_type="user",
+        target_id=user.user_id,
+        details="Admin logged in successfully",
+    )
+
+    db.commit()
 
     token = create_access_token(user.user_id, "admin")
 
@@ -565,8 +635,10 @@ def change_admin_password(
         "message": "Password changed successfully"
     }
 
+
 @app.post("/auth/employee/login", response_model=LoginResponse)
 def employee_login(login_data: LoginRequest, db: Session = Depends(get_db)):
+
     user = (
         db.query(models.User)
         .filter(
@@ -576,19 +648,55 @@ def employee_login(login_data: LoginRequest, db: Session = Depends(get_db)):
         .first()
     )
 
+    # Failed login
     if not user or not password_hash.verify(
         login_data.password, user.password_hash
     ):
+        log_action(
+            db=db,
+            user_id=user.user_id if user else None,
+            action="LOGIN_FAILED",
+            target_type="user",
+            target_id=user.user_id if user else None,
+            details="Employee login failed: Invalid credentials",
+        )
+        db.commit()
+
         raise HTTPException(
             status_code=401,
             detail="Invalid email or password"
         )
 
+    # Inactive account
     if not user.is_active:
+        log_action(
+            db=db,
+            user_id=user.user_id,
+            action="LOGIN_BLOCKED",
+            target_type="user",
+            target_id=user.user_id,
+            details="Employee login blocked: Account inactive",
+        )
+        db.commit()
+
         raise HTTPException(
             status_code=403,
             detail="Your account is not approved"
         )
+
+    # Successful login
+    user.last_login = datetime.now(timezone.utc)
+
+    log_action(
+        db=db,
+        user_id=user.user_id,
+        action="LOGIN_SUCCESS",
+        target_type="user",
+        target_id=user.user_id,
+        details="Employee logged in successfully",
+    )
+
+    db.commit()
 
     token = create_access_token(user.user_id, "employee")
 
@@ -598,8 +706,11 @@ def employee_login(login_data: LoginRequest, db: Session = Depends(get_db)):
         "role": "employee"
     }
 
+
+
 @app.post("/auth/student/login", response_model=LoginResponse)
 def student_login(login_data: LoginRequest, db: Session = Depends(get_db)):
+
     user = (
         db.query(models.User)
         .filter(
@@ -609,19 +720,55 @@ def student_login(login_data: LoginRequest, db: Session = Depends(get_db)):
         .first()
     )
 
+    # Failed login
     if not user or not password_hash.verify(
         login_data.password, user.password_hash
     ):
+        log_action(
+            db=db,
+            user_id=user.user_id if user else None,
+            action="LOGIN_FAILED",
+            target_type="user",
+            target_id=user.user_id if user else None,
+            details="Student login failed: Invalid credentials",
+        )
+        db.commit()
+
         raise HTTPException(
             status_code=401,
             detail="Invalid email or password"
         )
 
+    # Inactive account
     if not user.is_active:
+        log_action(
+            db=db,
+            user_id=user.user_id,
+            action="LOGIN_BLOCKED",
+            target_type="user",
+            target_id=user.user_id,
+            details="Student login blocked: Account inactive",
+        )
+        db.commit()
+
         raise HTTPException(
             status_code=403,
             detail="Your account is not approved"
         )
+
+    # Successful login
+    user.last_login = datetime.now(timezone.utc)
+
+    log_action(
+        db=db,
+        user_id=user.user_id,
+        action="LOGIN_SUCCESS",
+        target_type="user",
+        target_id=user.user_id,
+        details="Student logged in successfully",
+    )
+
+    db.commit()
 
     token = create_access_token(user.user_id, "student")
 
@@ -737,8 +884,25 @@ def update_employee_status(
             detail="Associated user account not found",
         )
 
+    # Store previous status
+    previous_status = employee.status
+
     employee.status = status_data.status
     user.is_active = status_data.status == "Active"
+
+    # Log only actual status changes
+    if previous_status != status_data.status:
+        log_action(
+            db=db,
+            user_id=admin.user_id,
+            action="EMPLOYEE_STATUS_UPDATED",
+            target_type="employee",
+            target_id=employee.id,
+            details=(
+                f"Employee status changed from "
+                f"{previous_status} to {employee.status}"
+            ),
+        )
 
     db.commit()
     db.refresh(employee)
@@ -777,8 +941,26 @@ def update_student_status(
             detail="Associated user account not found",
         )
 
+    # Store the previous status before updating
+    previous_status = student.status
+
     student.status = status_data.status
     user.is_active = status_data.status == "Active"
+
+    # Create audit log
+    # Create audit log only when status actually changes
+    if previous_status != status_data.status:
+        log_action(
+            db=db,
+            user_id=employee.user_id,
+            action="STUDENT_STATUS_UPDATED",
+            target_type="student",
+            target_id=student.id,
+            details=(
+            f"Student status changed from "
+            f"{previous_status} to {student.status}"
+        ),
+    )
 
     db.commit()
     db.refresh(student)
@@ -1687,6 +1869,44 @@ def get_student_interview_results(
         }
         for result, interview in results
     ]
+
+@app.get("/admin/audit-logs")
+def get_audit_logs(
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    logs = (
+        db.query(models.AuditLog)
+        .order_by(models.AuditLog.created_at.desc())
+        .all()
+    )
+
+    return logs
+
+
+
+@app.get("/employee/audit-logs")
+def get_employee_audit_logs(
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    logs = (
+        db.query(models.AuditLog)
+        .filter(
+            models.AuditLog.user_id == employee.user_id,
+            models.AuditLog.action.in_([
+                "LOGIN_SUCCESS",
+                "LOGIN_FAILED",
+                "LOGIN_BLOCKED",
+                "STUDENT_STATUS_UPDATED",
+            ])
+        )
+        .order_by(models.AuditLog.created_at.desc())
+        .all()
+    )
+
+    return logs
+
 
 
 

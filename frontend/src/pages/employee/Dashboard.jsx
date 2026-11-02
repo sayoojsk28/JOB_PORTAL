@@ -54,6 +54,12 @@ const dashboardCards = [
     description: 'Share important announcements and information with students.',
     icon: '📣',
   },
+  {
+  title: 'Audit Logs',
+  description: 'View your login activity and student approval or rejection history.',
+  icon: '📊',
+  path: '/employee/audit-logs',
+},
 ];
 
 function Dashboard() {

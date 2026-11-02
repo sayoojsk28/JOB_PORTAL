@@ -44,13 +44,13 @@ const adminOptions = [
     status: 'Available',
   },
   {
-    title: 'Block / Unblock Employees',
-    description: 'Manage access for verified employee accounts.',
-    icon: 'shield-check',
-    color: 'rose',
-    path: '/admin/manage-employees',
-    status: 'Coming soon',
-  },
+  title: 'Audit Logs',
+  description: 'View system activity, login attempts and user actions.',
+  icon: 'clipboard-list',
+  color: 'rose',
+  path: '/admin/audit-logs',
+  status: 'Available',
+},
   {
     title: 'Student Profiles & Verification',
     description:
@@ -145,6 +145,13 @@ const icons = {
       <path d="M14 2v6h6m-11 5 2 2 4-4" />
     </>
   ),
+  'clipboard-list': (
+  <>
+    <rect x="8" y="3" width="8" height="4" rx="1" />
+    <path d="M8 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+    <path d="M9 12h6M9 16h6" />
+  </>
+),
 };
 
 const AdminDashboard = () => {

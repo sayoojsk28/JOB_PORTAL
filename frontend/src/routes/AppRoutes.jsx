@@ -32,6 +32,7 @@ import PostResult from '../pages/employee/PostResults';
 import PublishResult from '../pages/employee/PublishResults';
 import ViewInterviewResults from '../pages/student/ViewInterviewResults';
 import ViewAcceptedCompanies from '../pages/employee/ViewAcceptedCompanies';
+import AuditLogs from '../pages/Dashboard/AuditLogs';
 
 const AppRoutes = () => {
   return (
@@ -69,6 +70,10 @@ const AppRoutes = () => {
     path="/admin/change-password"
     element={<ChangePassword />}
   />
+  <Route
+  path="/admin/audit-logs"
+  element={<AuditLogs />}
+/>
 </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['employee']} />}>
@@ -137,6 +142,7 @@ const AppRoutes = () => {
   element={<PublishResult />}
 />
 <Route path="/employee/accepted-companies" element={<ViewAcceptedCompanies />} />
+<Route path="/employee/audit-logs" element={<AuditLogs />} />
 
     </Routes>
   );
