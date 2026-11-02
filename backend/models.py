@@ -8,6 +8,12 @@ class Student(Base):
     __tablename__ = "students"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        unique=True,
+        nullable=False
+)
     full_name = Column(String(100), nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     phone = Column(String(20), nullable=False)
@@ -27,6 +33,12 @@ class Employee(Base):
     __tablename__ = "employees"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        unique=True,
+        nullable=False
+)
     full_name = Column(String(100), nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     phone = Column(String(20), nullable=False)
@@ -40,10 +52,44 @@ class Employee(Base):
     )
     profile_photo = Column(String(255), nullable=True)
 
+class User(Base):
+    __tablename__ = "users"
+
+    user_id = Column(Integer, primary_key=True, index=True)
+
+    email = Column(String(255), unique=True, index=True, nullable=False)
+
+    password_hash = Column(String(255), nullable=False)
+
+    name = Column(String(100), nullable=False)
+
+    role = Column(String(20), nullable=False)
+
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true")
+    )
+
+    last_login = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+
 class Admin(Base):
     __tablename__ = "admins"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        unique=True,
+        nullable=False
+)
     full_name = Column(String(100), nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)

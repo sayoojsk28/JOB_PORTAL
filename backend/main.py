@@ -121,6 +121,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 security = HTTPBearer()
 
 
+
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
@@ -144,19 +145,40 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Find the common user account
+    user = (
+        db.query(models.User)
+        .filter(models.User.user_id == user_id)
+        .first()
+    )
+
+    if not user or user.role != role:
+        raise HTTPException(
+            status_code=401,
+            detail="User account not found",
+        )
+
+    # Check common account status
+    if not user.is_active:
+        raise HTTPException(
+            status_code=403,
+            detail="Your account is not approved",
+        )
+
+    # Fetch the corresponding profile
     if role == "admin":
-        user = db.query(models.Admin).filter(
-            models.Admin.id == user_id
+        profile = db.query(models.Admin).filter(
+            models.Admin.user_id == user.user_id
         ).first()
 
     elif role == "employee":
-        user = db.query(models.Employee).filter(
-            models.Employee.id == user_id
+        profile = db.query(models.Employee).filter(
+            models.Employee.user_id == user.user_id
         ).first()
 
     elif role == "student":
-        user = db.query(models.Student).filter(
-            models.Student.id == user_id
+        profile = db.query(models.Student).filter(
+            models.Student.user_id == user.user_id
         ).first()
 
     else:
@@ -165,19 +187,14 @@ def get_current_user(
             detail="Invalid user role",
         )
 
-    if not user:
+    if not profile:
         raise HTTPException(
             status_code=401,
-            detail="User account not found",
+            detail="User profile not found",
         )
 
-    if role != "admin" and user.status != "Active":
-        raise HTTPException(
-            status_code=403,
-            detail="Your account is not approved",
-        )
+    return profile
 
-    return user
 
 
 def require_admin(
@@ -229,25 +246,60 @@ def create_default_admin():
                 "ADMIN_EMAIL and ADMIN_PASSWORD must be set in .env"
             )
 
-        existing_admin = (
-            db.query(models.Admin)
-            .filter(models.Admin.email == admin_email)
+        # Check whether the admin already exists
+        existing_user = (
+            db.query(models.User)
+            .filter(models.User.email == admin_email)
             .first()
         )
 
-        if existing_admin:
+        if existing_user:
+            if existing_user.role != "admin":
+                raise ValueError(
+                    "ADMIN_EMAIL is already registered with another role"
+                )
+
+            existing_admin = (
+                db.query(models.Admin)
+                .filter(models.Admin.user_id == existing_user.user_id)
+                .first()
+            )
+
+            if not existing_admin:
+                raise ValueError(
+                    "Admin user exists, but admin profile is missing"
+                )
+
             print("Default Admin already exists.")
             return
 
-        admin = models.Admin(
+        # Hash password once for both tables
+        hashed_password = password_hash.hash(admin_password)
+
+        # Create central user account
+        new_user = models.User(
+            name=admin_name,
+            email=admin_email,
+            password_hash=hashed_password,
+            role="admin",
+            is_active=True,
+        )
+
+        db.add(new_user)
+        db.flush()
+
+        # Create admin profile linked to the user
+        new_admin = models.Admin(
+            user_id=new_user.user_id,
             full_name=admin_name,
             email=admin_email,
-            hashed_password=password_hash.hash(admin_password),
+            hashed_password=hashed_password,
             status="Active",
         )
 
-        db.add(admin)
+        db.add(new_admin)
         db.commit()
+
         print("Default Admin created successfully!")
 
     except Exception:
@@ -276,45 +328,64 @@ def home():
     response_model=StudentResponse,
     status_code=status.HTTP_201_CREATED,
 )
+
+
 def register_student(
     student: StudentRegister,
     db: Session = Depends(get_db),
 ):
-    existing_student = (
-        db.query(models.Student)
-        .filter(models.Student.email == student.email)
+    existing_user = (
+        db.query(models.User)
+        .filter(models.User.email == student.email)
         .first()
     )
 
-    if existing_student:
+    if existing_user:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email is already registered",
         )
 
-    new_student = models.Student(
-        full_name=student.full_name,
+    hashed_password = password_hash.hash(student.password)
+
+    new_user = models.User(
+        name=student.full_name,
         email=student.email,
-        phone=student.phone,
-        date_of_birth=student.date_of_birth,
-        gender=student.gender,
-        address=student.address,
-        qualification=student.qualification,
-        department=student.department,
-        year_of_passing=student.year_of_passing,
-        skills=student.skills,
-        hashed_password=password_hash.hash(student.password),
+        password_hash=hashed_password,
+        role="student",
+        is_active=False,
     )
 
+    new_student = None
+
     try:
+        db.add(new_user)
+        db.flush()
+
+        new_student = models.Student(
+            user_id=new_user.user_id,
+            full_name=student.full_name,
+            email=student.email,
+            phone=student.phone,
+            date_of_birth=student.date_of_birth,
+            gender=student.gender,
+            address=student.address,
+            qualification=student.qualification,
+            department=student.department,
+            year_of_passing=student.year_of_passing,
+            skills=student.skills,
+            hashed_password=hashed_password,
+        )
+
         db.add(new_student)
         db.commit()
         db.refresh(new_student)
+
     except IntegrityError:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A student with these details already exists",
+            detail="Email is already registered",
         )
 
     return new_student
@@ -334,13 +405,13 @@ def register_employee(
     profile_photo: UploadFile | None = File(None),
     db: Session = Depends(get_db),
 ):
-    existing_employee = (
-        db.query(models.Employee)
-        .filter(models.Employee.email == email)
+    existing_user = (
+        db.query(models.User)
+        .filter(models.User.email == email)
         .first()
     )
 
-    if existing_employee:
+    if existing_user:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email is already registered",
@@ -374,19 +445,34 @@ def register_employee(
         finally:
             profile_photo.file.close()
 
-    new_employee = models.Employee(
-        full_name=full_name,
+    hashed_password = password_hash.hash(password)
+
+    new_user = models.User(
+        name=full_name,
         email=email,
-        phone=phone,
-        designation=designation,
-        hashed_password=password_hash.hash(password),
-        profile_photo=photo_path,
+        password_hash=hashed_password,
+        role="employee",
+        is_active=False,
     )
 
     try:
+        db.add(new_user)
+        db.flush()
+
+        new_employee = models.Employee(
+            user_id=new_user.user_id,
+            full_name=full_name,
+            email=email,
+            phone=phone,
+            designation=designation,
+            hashed_password=hashed_password,
+            profile_photo=photo_path,
+        )
+
         db.add(new_employee)
         db.commit()
         db.refresh(new_employee)
+
     except IntegrityError:
         db.rollback()
 
@@ -395,7 +481,7 @@ def register_employee(
 
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="An employee with these details already exists",
+            detail="Email is already registered",
         )
 
     return new_employee
@@ -403,25 +489,30 @@ def register_employee(
 
 @app.post("/auth/admin/login", response_model=LoginResponse)
 def admin_login(login_data: LoginRequest, db: Session = Depends(get_db)):
-    admin = db.query(models.Admin).filter(
-        models.Admin.email == login_data.email
-    ).first()
+    user = (
+        db.query(models.User)
+        .filter(
+            models.User.email == login_data.email,
+            models.User.role == "admin"
+        )
+        .first()
+    )
 
-    if not admin or not password_hash.verify(
-        login_data.password, admin.hashed_password
+    if not user or not password_hash.verify(
+        login_data.password, user.password_hash
     ):
         raise HTTPException(
             status_code=401,
             detail="Invalid email or password"
         )
 
-    if admin.status != "Active":
+    if not user.is_active:
         raise HTTPException(
             status_code=403,
             detail="Admin account is inactive"
         )
 
-    token = create_access_token(admin.id, "admin")
+    token = create_access_token(user.user_id, "admin")
 
     return {
         "access_token": token,
@@ -450,9 +541,22 @@ def change_admin_password(
             detail="New password must be different from current password",
         )
 
-    admin.hashed_password = password_hash.hash(
+    user = db.query(models.User).filter(
+        models.User.user_id == admin.user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="Associated user account not found",
+        )
+
+    new_hashed_password = password_hash.hash(
         password_data.new_password
     )
+
+    admin.hashed_password = new_hashed_password
+    user.password_hash = new_hashed_password
 
     db.commit()
     db.refresh(admin)
@@ -462,66 +566,69 @@ def change_admin_password(
     }
 
 @app.post("/auth/employee/login", response_model=LoginResponse)
-def employee_login(
-    login_data: LoginRequest,
-    db: Session = Depends(get_db),
-):
-    employee = db.query(models.Employee).filter(
-        models.Employee.email == login_data.email
-    ).first()
+def employee_login(login_data: LoginRequest, db: Session = Depends(get_db)):
+    user = (
+        db.query(models.User)
+        .filter(
+            models.User.email == login_data.email,
+            models.User.role == "employee"
+        )
+        .first()
+    )
 
-    if not employee or not password_hash.verify(
-        login_data.password, employee.hashed_password
+    if not user or not password_hash.verify(
+        login_data.password, user.password_hash
     ):
         raise HTTPException(
             status_code=401,
-            detail="Invalid email or password",
+            detail="Invalid email or password"
         )
 
-    if employee.status != "Active":
+    if not user.is_active:
         raise HTTPException(
             status_code=403,
-            detail=f"Your account status is {employee.status}. Access denied.",
+            detail="Your account is not approved"
         )
 
-    token = create_access_token(employee.id, "employee")
+    token = create_access_token(user.user_id, "employee")
 
     return {
         "access_token": token,
         "token_type": "bearer",
-        "role": "employee",
+        "role": "employee"
     }
 
-
 @app.post("/auth/student/login", response_model=LoginResponse)
-def student_login(
-    login_data: LoginRequest,
-    db: Session = Depends(get_db),
-):
-    student = db.query(models.Student).filter(
-        models.Student.email == login_data.email
-    ).first()
+def student_login(login_data: LoginRequest, db: Session = Depends(get_db)):
+    user = (
+        db.query(models.User)
+        .filter(
+            models.User.email == login_data.email,
+            models.User.role == "student"
+        )
+        .first()
+    )
 
-    if not student or not password_hash.verify(
-        login_data.password, student.hashed_password
+    if not user or not password_hash.verify(
+        login_data.password, user.password_hash
     ):
         raise HTTPException(
             status_code=401,
-            detail="Invalid email or password",
+            detail="Invalid email or password"
         )
 
-    if student.status != "Active":
+    if not user.is_active:
         raise HTTPException(
             status_code=403,
-            detail=f"Your account status is {student.status}. Access denied.",
+            detail="Your account is not approved"
         )
 
-    token = create_access_token(student.id, "student")
+    token = create_access_token(user.user_id, "student")
 
     return {
         "access_token": token,
         "token_type": "bearer",
-        "role": "student",
+        "role": "student"
     }
 
 
@@ -620,7 +727,19 @@ def update_employee_status(
             detail="Employee not found",
         )
 
+    user = db.query(models.User).filter(
+        models.User.user_id == employee.user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="Associated user account not found",
+        )
+
     employee.status = status_data.status
+    user.is_active = status_data.status == "Active"
+
     db.commit()
     db.refresh(employee)
 
@@ -648,7 +767,19 @@ def update_student_status(
             detail="Student not found",
         )
 
+    user = db.query(models.User).filter(
+        models.User.user_id == student.user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="Associated user account not found",
+        )
+
     student.status = status_data.status
+    user.is_active = status_data.status == "Active"
+
     db.commit()
     db.refresh(student)
 
