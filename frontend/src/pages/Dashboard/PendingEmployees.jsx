@@ -8,6 +8,9 @@ const PendingEmployees = () => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [selectedStatus, setSelectedStatus] = useState('');
 
   const fetchEmployees = async () => {
     setLoading(true);
@@ -67,6 +70,22 @@ const handleStatusUpdate = async (employeeId, status) => {
       error.response?.data?.detail || 'Failed to update employee status.'
     );
   }
+};
+
+const openConfirmDialog = (employee, status) => {
+  setSelectedEmployee(employee);
+  setSelectedStatus(status);
+  setShowConfirmDialog(true);
+};
+
+const confirmStatusUpdate = async () => {
+  if (!selectedEmployee || !selectedStatus) return;
+
+  await handleStatusUpdate(selectedEmployee.id, selectedStatus);
+
+  setShowConfirmDialog(false);
+  setSelectedEmployee(null);
+  setSelectedStatus('');
 };
 
   return (
@@ -252,20 +271,20 @@ const handleStatusUpdate = async (employeeId, status) => {
                   
 <div className="mt-5 flex gap-3 border-t border-slate-100 pt-4">
   <button
-    type="button"
-    onClick={() => handleStatusUpdate(employee.id, 'Active')}
-    className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700"
-  >
-    ✓ Approve
-  </button>
+  type="button"
+  onClick={() => openConfirmDialog(employee, 'Active')}
+  className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700"
+>
+  ✓ Approve
+</button>
 
   <button
-    type="button"
-    onClick={() => handleStatusUpdate(employee.id, 'Rejected')}
-    className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700"
-  >
-    ✕ Reject
-  </button>
+  type="button"
+  onClick={() => openConfirmDialog(employee, 'Rejected')}
+  className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700"
+>
+  ✕ Reject
+</button>
 </div>
 
                 </article>
@@ -284,6 +303,68 @@ const handleStatusUpdate = async (employeeId, status) => {
           </p>
         </section>
       </div>
+      {showConfirmDialog && (
+  <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/50 px-4 backdrop-blur-sm">
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl sm:p-8"
+    >
+      <div
+        className={`mb-5 flex h-12 w-12 items-center justify-center rounded-xl ${
+          selectedStatus === 'Active'
+            ? 'bg-emerald-50 text-emerald-600'
+            : 'bg-red-50 text-red-600'
+        }`}
+      >
+        <span className="text-2xl">
+          {selectedStatus === 'Active' ? '✓' : '✕'}
+        </span>
+      </div>
+
+      <h2 className="text-xl font-bold text-slate-900">
+        {selectedStatus === 'Active'
+          ? 'Accept Employee?'
+          : 'Reject Employee?'}
+      </h2>
+
+      <p className="mt-2 text-sm leading-6 text-slate-500">
+        Are you sure you want to{' '}
+        {selectedStatus === 'Active' ? 'accept' : 'reject'}{' '}
+        <span className="font-semibold text-slate-700">
+          {selectedEmployee?.full_name}
+        </span>
+        ?
+      </p>
+
+      <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        <button
+          type="button"
+          onClick={() => {
+            setShowConfirmDialog(false);
+            setSelectedEmployee(null);
+            setSelectedStatus('');
+          }}
+          className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+        >
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          onClick={confirmStatusUpdate}
+          className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition ${
+            selectedStatus === 'Active'
+              ? 'bg-emerald-600 hover:bg-emerald-700'
+              : 'bg-red-600 hover:bg-red-700'
+          }`}
+        >
+          Yes, {selectedStatus === 'Active' ? 'Accept' : 'Reject'}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
     </main>
   );
 };

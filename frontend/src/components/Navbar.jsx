@@ -16,6 +16,7 @@ const Navbar = () => {
 
   const isHomePage = location.pathname === '/';
   const isStudent = user?.role === 'student';
+  const isEmployee = user?.role === 'employee';
   const isAdmin = user?.role === 'admin';
 
   const dashboardRoutes = {
@@ -47,16 +48,33 @@ const Navbar = () => {
       setNotificationLoading(false);
     }
   };
+  const fetchEmployeeNotifications = async () => {
+  if (!isEmployee) return;
+
+  try {
+    setNotificationLoading(true);
+
+    const response = await api.get('/employee/notifications');
+
+    setNotifications(response.data);
+  } catch (err) {
+    console.error('Employee notification fetch error:', err);
+  } finally {
+    setNotificationLoading(false);
+  }
+};
 
   // Fetch notifications when student logs in
   useEffect(() => {
-    if (isStudent) {
-      fetchNotifications();
-    } else {
-      setNotifications([]);
-      setShowNotifications(false);
-    }
-  }, [isStudent]);
+  if (isStudent) {
+    fetchNotifications();
+  } else if (isEmployee) {
+    fetchEmployeeNotifications();
+  } else {
+    setNotifications([]);
+    setShowNotifications(false);
+  }
+}, [isStudent, isEmployee]);
 
   const unreadCount = notifications.filter(
     (item) => !item.is_read
@@ -79,9 +97,13 @@ const Navbar = () => {
 
   if (nextState) {
     try {
-      await fetchNotifications();
-
-      await api.patch('/student/notifications/read');
+      if (isStudent) {
+        await fetchNotifications();
+        await api.patch('/student/notifications/read');
+      } else if (isEmployee) {
+        await fetchEmployeeNotifications();
+        await api.patch('/employee/notifications/read');
+      }
 
       setNotifications((prev) =>
         prev.map((item) => ({
@@ -89,7 +111,6 @@ const Navbar = () => {
           is_read: true,
         }))
       );
-
     } catch (err) {
       console.error('Unable to mark notifications as read:', err);
     }
@@ -97,16 +118,9 @@ const Navbar = () => {
 };
 
   const handleSignOut = () => {
-    logout();
-    setShowNotifications(false);
-    setNotifications([]);
-
-    if (isAdmin) {
-      navigate('/login/admin', { replace: true });
-    } else {
-      navigate('/', { replace: true });
-    }
-  };
+  setShowNotifications(false);
+  logout();
+};
 
   return (
     <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
@@ -123,14 +137,14 @@ const Navbar = () => {
         <div className="flex items-center gap-2 sm:gap-3">
 
           {/* Student notifications only */}
-          {isStudent && (
+          {(isStudent || isEmployee) && (
             <div className="relative">
 
               <button
                 type="button"
                 onClick={handleNotificationClick}
                 className="relative rounded-xl border border-slate-200 p-3 text-slate-600 transition hover:bg-blue-50 hover:text-blue-700"
-                aria-label="Student notifications"
+                aria-label={isEmployee ? 'Employee notifications' : 'Student notifications'}
                 aria-expanded={showNotifications}
               >
                 <svg
@@ -225,7 +239,7 @@ const Navbar = () => {
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center justify-between gap-2">
                                   <h4 className="text-sm font-semibold text-slate-800">
-                                    Application Update
+                                    Notification
                                   </h4>
 
                                   {!item.is_read && (

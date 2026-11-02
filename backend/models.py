@@ -1,6 +1,7 @@
 
 from sqlalchemy import Column, Integer, String, Date , Text,BigInteger, ForeignKey, DateTime, func,Boolean,Time,Float
 from sqlalchemy import text
+from sqlalchemy.orm import relationship
 from database import Base
 
 
@@ -269,7 +270,7 @@ class Notification(Base):
     application_id = Column(
         Integer,
         ForeignKey("applications.application_id"),
-        nullable=False
+        nullable=True
     )
     message = Column(String(500), nullable=False)
     is_read = Column(Boolean, nullable=False, default=False, server_default=text("false"))
@@ -402,3 +403,45 @@ class AuditLog(Base):
         server_default=func.now(),
         index=True
     )
+
+class EmployeeNotification(Base):
+    __tablename__ = "employee_notifications"
+
+    notification_id = Column(Integer, primary_key=True, index=True)
+    employee_id = Column(
+        Integer,
+        ForeignKey("employees.id"),
+        nullable=False
+    )
+    message = Column(String(500), nullable=False)
+    is_read = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false")
+    )
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+
+class StudentFeedback(Base):
+    __tablename__ = "student_feedback"
+
+    feedback_id = Column(Integer, primary_key=True, index=True)
+
+    student_id = Column(
+        Integer,
+        ForeignKey("students.id"),
+        nullable=False
+    )
+
+    message = Column(String(500), nullable=False)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+    student = relationship("Student")

@@ -30,7 +30,9 @@ from schemas import (
     InterviewAttendanceUpdate,
     InterviewResultResponse,
     InterviewResultCreate,
-    StudentInterviewResultResponse
+    StudentInterviewResultResponse,
+    AnnouncementCreate,
+    StudentFeedbackCreate,
 )
 import os
 import uuid
@@ -913,6 +915,52 @@ def update_employee_status(
         "status": employee.status,
     }
 
+@app.get("/admin/employees/status-history")
+def get_employee_status_history(
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    employees = (
+        db.query(models.Employee)
+        .filter(
+            models.Employee.status.in_(["Active", "Rejected"])
+        )
+        .order_by(models.Employee.id.desc())
+        .all()
+    )
+
+    result = []
+
+    for employee in employees:
+        history = (
+            db.query(models.AuditLog)
+            .filter(
+                models.AuditLog.target_type == "employee",
+                models.AuditLog.target_id == employee.id,
+                models.AuditLog.action == "EMPLOYEE_STATUS_UPDATED",
+            )
+            .order_by(models.AuditLog.created_at.desc())
+            .all()
+        )
+
+        result.append({
+            "id": employee.id,
+            "full_name": employee.full_name,
+            "email": employee.email,
+            "phone": employee.phone,
+            "designation": employee.designation,
+            "status": employee.status,
+            "history": [
+                {
+                    "action": log.action,
+                    "details": log.details,
+                    "changed_at": log.created_at,
+                }
+                for log in history
+            ],
+        })
+
+    return result
 
 @app.patch("/employee/students/{student_id}/status")
 def update_student_status(
@@ -1907,6 +1955,208 @@ def get_employee_audit_logs(
 
     return logs
 
+@app.get("/admin/students/active")
+def get_active_students(
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    students = (
+        db.query(models.Student)
+        .filter(models.Student.status == "Active")
+        .order_by(models.Student.id.desc())
+        .all()
+    )
 
+    return [
+        {
+            "id": student.id,
+            "full_name": student.full_name,
+            "email": student.email,
+            "phone": student.phone,
+            "qualification": student.qualification,
+            "department": student.department,
+            "year_of_passing": student.year_of_passing,
+            "status": student.status,
+        }
+        for student in students
+    ]
 
+@app.get("/employee/notifications")
+def get_employee_notifications(
+    db: Session = Depends(get_db),
+    employee: models.Employee = Depends(require_employee),
+):
+    notifications = (
+        db.query(models.EmployeeNotification)
+        .filter(
+            models.EmployeeNotification.employee_id == employee.id
+        )
+        .order_by(
+            models.EmployeeNotification.created_at.desc()
+        )
+        .all()
+    )
 
+    return [
+        {
+            "notification_id": item.notification_id,
+            "message": item.message,
+            "is_read": item.is_read,
+            "created_at": item.created_at,
+        }
+        for item in notifications
+    ]
+
+@app.patch("/employee/notifications/read")
+def mark_employee_notifications_as_read(
+    db: Session = Depends(get_db),
+    employee: models.Employee = Depends(require_employee),
+):
+    updated_count = (
+        db.query(models.EmployeeNotification)
+        .filter(
+            models.EmployeeNotification.employee_id == employee.id,
+            models.EmployeeNotification.is_read == False
+        )
+        .update(
+            {models.EmployeeNotification.is_read: True},
+            synchronize_session=False
+        )
+    )
+
+    db.commit()
+
+    return {
+        "message": "Notifications marked as read",
+        "updated_count": updated_count
+    }
+
+@app.post("/admin/announcements")
+def send_announcement(
+    announcement: AnnouncementCreate,
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(require_admin),
+):
+    message = announcement.message.strip()
+    recipient_type = announcement.recipient_type
+
+    if not message:
+        raise HTTPException(
+            status_code=400,
+            detail="Announcement message cannot be empty"
+        )
+
+    if len(message) > 500:
+        raise HTTPException(
+            status_code=400,
+            detail="Announcement cannot exceed 500 characters"
+        )
+
+    if recipient_type not in ["employees", "students", "both"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid recipient type"
+        )
+
+    employee_count = 0
+    student_count = 0
+
+    if recipient_type in ["employees", "both"]:
+        employees = (
+            db.query(models.Employee)
+            .filter(models.Employee.status == "Active")
+            .all()
+        )
+
+        for employee in employees:
+            notification = models.EmployeeNotification(
+                employee_id=employee.id,
+                message=message
+            )
+            db.add(notification)
+
+        employee_count = len(employees)
+
+    if recipient_type in ["students", "both"]:
+        students = (
+            db.query(models.Student)
+            .filter(models.Student.status == "Active")
+            .all()
+        )
+
+        for student in students:
+            notification = models.Notification(
+                student_id=student.id,
+                application_id=None,
+                message=message
+            )
+            db.add(notification)
+
+        student_count = len(students)
+
+    db.commit()
+
+    return {
+        "message": "Announcement sent successfully",
+        "employees_notified": employee_count,
+        "students_notified": student_count
+    }
+@app.post("/student/feedback")
+def submit_student_feedback(
+    feedback: StudentFeedbackCreate,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    message = feedback.message.strip()
+
+    if not message:
+        raise HTTPException(
+            status_code=400,
+            detail="Feedback cannot be empty"
+        )
+
+    if len(message) > 500:
+        raise HTTPException(
+            status_code=400,
+            detail="Feedback cannot exceed 500 characters"
+        )
+
+    new_feedback = models.StudentFeedback(
+        student_id=student.id,
+        message=message
+    )
+
+    db.add(new_feedback)
+    db.commit()
+    db.refresh(new_feedback)
+
+    return {
+        "message": "Feedback submitted successfully",
+        "feedback_id": new_feedback.feedback_id
+    }
+
+@app.get("/admin/student-feedback")
+def get_student_feedback(
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(require_admin),
+):
+    feedbacks = (
+        db.query(models.StudentFeedback)
+        .join(
+            models.Student,
+            models.StudentFeedback.student_id == models.Student.id
+        )
+        .order_by(models.StudentFeedback.created_at.desc())
+        .all()
+    )
+
+    return [
+        {
+            "feedback_id": item.feedback_id,
+            "student_name": item.student.full_name,
+            "student_email": item.student.email,
+            "message": item.message,
+            "created_at": item.created_at,
+        }
+        for item in feedbacks
+    ]

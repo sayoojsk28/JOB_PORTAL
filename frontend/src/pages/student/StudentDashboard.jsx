@@ -43,10 +43,11 @@ const dashboardCards = [
   path: '/student/chatbot',
 },
   {
-    title: 'Feedback to Admin',
-    description: 'Share your suggestions, feedback or concerns.',
-    icon: '💬',
-  },
+  title: 'Feedback to Admin',
+  description: 'Share your suggestions, feedback or complaints with the admin.',
+  icon: '💬',
+  path: '/student/feedback',
+},
 ];
 
 export default function StudentDashboard() {

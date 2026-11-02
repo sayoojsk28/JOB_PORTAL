@@ -221,3 +221,10 @@ class StudentInterviewResultResponse(BaseModel):
     score: Optional[float] = None
     feedback: Optional[str] = None
     published_on: Optional[datetime] = None
+
+class AnnouncementCreate(BaseModel):
+    recipient_type: str
+    message: str
+
+class StudentFeedbackCreate(BaseModel):
+    message: str

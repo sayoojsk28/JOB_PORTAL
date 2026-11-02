@@ -33,6 +33,10 @@ import PublishResult from '../pages/employee/PublishResults';
 import ViewInterviewResults from '../pages/student/ViewInterviewResults';
 import ViewAcceptedCompanies from '../pages/employee/ViewAcceptedCompanies';
 import AuditLogs from '../pages/Dashboard/AuditLogs';
+import EmployeeStatus from '../pages/Dashboard/EmployeeStatus';
+import ViewStudents from '../pages/Dashboard/ViewStudents';
+import SendAnnouncements from '../pages/Dashboard/SendAnnouncements';
+import StudentFeedback from '../pages/Student/StudentFeedback';
 
 const AppRoutes = () => {
   return (
@@ -74,6 +78,18 @@ const AppRoutes = () => {
   path="/admin/audit-logs"
   element={<AuditLogs />}
 />
+<Route
+  path="/admin/employee-status"
+  element={<EmployeeStatus />}
+/>
+<Route
+  path="/admin/students"
+  element={<ViewStudents />}
+/>
+<Route
+  path="/admin/announcements"
+  element={<SendAnnouncements />}
+/>
 </Route>
 
       <Route element={<ProtectedRoute allowedRoles={['employee']} />}>
@@ -105,6 +121,10 @@ const AppRoutes = () => {
 <Route
   path="/student/interview-results"
   element={<ViewInterviewResults />}
+/>
+<Route
+  path="/student/feedback"
+  element={<StudentFeedback />}
 />
       </Route>
       <Route
