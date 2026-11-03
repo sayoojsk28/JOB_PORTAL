@@ -27,6 +27,7 @@ class Student(Base):
     year_of_passing = Column(Integer, nullable=False)
     skills = Column(String(1000), nullable=False)
     hashed_password = Column(String(255), nullable=False)
+    profile_photo = Column(String(500), nullable=True)
     
     status = Column(String(20),nullable=False,default="Pending",server_default=text("'Pending'"))
 

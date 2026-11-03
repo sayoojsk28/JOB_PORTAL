@@ -29,7 +29,8 @@ class StudentResponse(BaseModel):
     qualification: str
     department: str
     year_of_passing: int
-
+    skills: str
+    profile_photo: str | None = None
 
 class EmployeeRegister(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)

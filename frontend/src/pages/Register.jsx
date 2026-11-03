@@ -43,6 +43,34 @@ const Register = () => {
     }));
   };
 
+  const handlePhotoChange = (e) => {
+    const file = e.target.files?.[0] || null;
+
+    if (!file) {
+      setProfilePhoto(null);
+      return;
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+
+    if (!allowedTypes.includes(file.type)) {
+      setError('Please select a JPG, PNG or WEBP image.');
+      e.target.value = '';
+      setProfilePhoto(null);
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Profile photo must be smaller than 5 MB.');
+      e.target.value = '';
+      setProfilePhoto(null);
+      return;
+    }
+
+    setError('');
+    setProfilePhoto(file);
+  };
+
   const passwordChecks = [
     form.password.length >= 8,
     /[A-Z]/.test(form.password),
@@ -54,6 +82,7 @@ const Register = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
     setError('');
     setSuccess('');
 
@@ -63,7 +92,9 @@ const Register = () => {
     }
 
     if (!/[A-Z]/.test(form.password) || !/\d/.test(form.password)) {
-      setError('Password must include at least one uppercase letter and one number.');
+      setError(
+        'Password must include at least one uppercase letter and one number.'
+      );
       return;
     }
 
@@ -72,34 +103,35 @@ const Register = () => {
       return;
     }
 
-    
+    if (!profilePhoto && role === 'student') {
+      setError('Please upload your profile photo.');
+      return;
+    }
+
     const endpoint =
       role === 'student' ? '/students/register' : '/employees/register';
 
-    let payload;
+    const payload = new FormData();
+
+    payload.append('full_name', form.full_name.trim());
+    payload.append('email', form.email.trim());
+    payload.append('phone', form.phone.trim());
+    payload.append('password', form.password);
 
     if (role === 'student') {
-      payload = {
-        full_name: form.full_name.trim(),
-        email: form.email.trim(),
-        phone: form.phone.trim(),
-        date_of_birth: form.date_of_birth,
-        gender: form.gender,
-        address: form.address.trim(),
-        qualification: form.qualification.trim(),
-        department: form.department.trim(),
-        year_of_passing: Number(form.year_of_passing),
-        skills: form.skills.trim(),
-        password: form.password,
-      };
+      payload.append('date_of_birth', form.date_of_birth);
+      payload.append('gender', form.gender);
+      payload.append('address', form.address.trim());
+      payload.append('qualification', form.qualification.trim());
+      payload.append('department', form.department.trim());
+      payload.append(
+        'year_of_passing',
+        String(Number(form.year_of_passing))
+      );
+      payload.append('skills', form.skills.trim());
+      payload.append('profile_photo', profilePhoto);
     } else {
-      payload = new FormData();
-
-      payload.append('full_name', form.full_name.trim());
-      payload.append('email', form.email.trim());
-      payload.append('phone', form.phone.trim());
       payload.append('designation', form.designation.trim());
-      payload.append('password', form.password);
 
       if (profilePhoto) {
         payload.append('profile_photo', profilePhoto);
@@ -108,18 +140,16 @@ const Register = () => {
 
     setLoading(true);
 
-
     try {
-      const endpoint =
-        role === 'student' ? '/students/register' : '/employees/register';
-
-      
       await api.post(endpoint, payload);
 
       if (role === 'student') {
-        navigate('/student/registration-success');
-      } 
-
+        alert('Registration completed. Wait for employee approval.');
+        navigate('/login/student');
+      } else {
+        alert('Registration completed. Wait for admin approval.');
+        navigate('/login/employee');
+      }
     } catch (err) {
       const detail = err.response?.data?.detail;
 
@@ -137,6 +167,7 @@ const Register = () => {
 
   const changeRole = (nextRole) => {
     setRole(nextRole);
+    setProfilePhoto(null);
     setError('');
     setSuccess('');
   };
@@ -301,50 +332,51 @@ const Register = () => {
                   />
                 </div>
               )}
-            
-            {role === 'employee' && (
-              <div>
-                <label className={labelClass} htmlFor="profile_photo">
-                  Profile photo <span className="font-normal text-slate-400">(Optional)</span>
-                </label>
 
-                <input
-                  className={inputClass}
-                  id="profile_photo"
-                  name="profile_photo"
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={(e) =>
-                    setProfilePhoto(e.target.files?.[0] || null)
-                  }
-                />
-
-                <p className="mt-2 text-xs text-slate-500">
-                  Accepted formats: JPG, PNG or WEBP.
-                </p>
-
-                {profilePhoto && (
-                  <div className="mt-3 flex items-center gap-3">
-                    <img
-                      src={URL.createObjectURL(profilePhoto)}
-                      alt="Selected profile preview"
-                      className="h-16 w-16 rounded-full border border-slate-200 object-cover"
-                    />
-                    <span className="break-all text-sm text-slate-600">
-                      {profilePhoto.name}
+              {/* Employee profile photo - optional */}
+              {role === 'employee' && (
+                <div>
+                  <label className={labelClass} htmlFor="employee_photo">
+                    Profile photo{' '}
+                    <span className="font-normal text-slate-400">
+                      (Optional)
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setProfilePhoto(null)}
-                      className="text-sm font-semibold text-red-600 hover:text-red-800"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+                  </label>
 
+                  <input
+                    className={inputClass}
+                    id="employee_photo"
+                    name="profile_photo"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handlePhotoChange}
+                  />
+
+                  <p className="mt-2 text-xs text-slate-500">
+                    Accepted formats: JPG, PNG or WEBP. Maximum size: 5 MB.
+                  </p>
+
+                  {profilePhoto && (
+                    <div className="mt-3 flex items-center gap-3">
+                      <img
+                        src={URL.createObjectURL(profilePhoto)}
+                        alt="Selected employee profile preview"
+                        className="h-16 w-16 rounded-full border border-slate-200 object-cover"
+                      />
+                      <span className="break-all text-sm text-slate-600">
+                        {profilePhoto.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setProfilePhoto(null)}
+                        className="text-sm font-semibold text-red-600 hover:text-red-800"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {role === 'student' && (
@@ -356,6 +388,51 @@ const Register = () => {
                   <p className="mt-1 text-sm text-slate-500">
                     Tell us a little more about your education.
                   </p>
+                </div>
+
+                {/* Mandatory student profile photo */}
+                <div>
+                  <label className={labelClass} htmlFor="student_photo">
+                    Profile photo <span className="text-red-500">*</span>
+                  </label>
+
+                  <input
+                    className={inputClass}
+                    id="student_photo"
+                    name="profile_photo"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    required
+                    onChange={handlePhotoChange}
+                  />
+
+                  <p className="mt-2 text-xs text-slate-500">
+                    Profile photo is required. Accepted formats: JPG, PNG or
+                    WEBP. Maximum size: 5 MB.
+                  </p>
+
+                  {profilePhoto && (
+                    <div className="mt-3 flex items-center gap-3">
+                      <img
+                        src={URL.createObjectURL(profilePhoto)}
+                        alt="Selected student profile preview"
+                        className="h-16 w-16 rounded-full border border-slate-200 object-cover"
+                      />
+                      <span className="break-all text-sm text-slate-600">
+                        {profilePhoto.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfilePhoto(null);
+                          document.getElementById('student_photo').value = '';
+                        }}
+                        className="text-sm font-semibold text-red-600 hover:text-red-800"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid gap-5 sm:grid-cols-2">
@@ -391,7 +468,9 @@ const Register = () => {
                       <option value="Male">Male</option>
                       <option value="Female">Female</option>
                       <option value="Other">Other</option>
-                      <option value="Prefer not to say">Prefer not to say</option>
+                      <option value="Prefer not to say">
+                        Prefer not to say
+                      </option>
                     </select>
                   </div>
 

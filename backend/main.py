@@ -45,7 +45,8 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 from fastapi.staticfiles import StaticFiles
 from fastapi import Body
-
+from pathlib import Path
+from datetime import date
 import jwt
 os.makedirs("uploads/employee_photos", exist_ok=True)
 
@@ -367,13 +368,24 @@ def home():
 )
 
 
-def register_student(
-    student: StudentRegister,
+async def register_student(
+    full_name: str = Form(..., min_length=2, max_length=100),
+    email: EmailStr = Form(...),
+    phone: str = Form(..., min_length=7, max_length=20),
+    date_of_birth: date = Form(...),
+    gender: str = Form(..., min_length=1, max_length=20),
+    address: str = Form(..., min_length=5, max_length=500),
+    qualification: str = Form(..., min_length=2, max_length=100),
+    department: str = Form(..., min_length=2, max_length=100),
+    year_of_passing: int = Form(..., ge=1950, le=2100),
+    skills: str = Form(..., min_length=1, max_length=1000),
+    password: str = Form(..., min_length=8, max_length=128),
+    profile_photo: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
     existing_user = (
         db.query(models.User)
-        .filter(models.User.email == student.email)
+        .filter(models.User.email == email)
         .first()
     )
 
@@ -383,17 +395,55 @@ def register_student(
             detail="Email is already registered",
         )
 
-    hashed_password = password_hash.hash(student.password)
+    # Validate photo format
+    allowed_types = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+    }
+
+    if profile_photo.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail="Only JPG and PNG images are allowed",
+        )
+
+    # Read and validate photo size (maximum 5 MB)
+    photo_data = await profile_photo.read()
+
+    if len(photo_data) > 5 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail="Profile photo must be smaller than 5 MB",
+        )
+
+    if not photo_data:
+        raise HTTPException(
+            status_code=400,
+            detail="Profile photo is required",
+        )
+
+    # Create a unique filename
+    extension = allowed_types[profile_photo.content_type]
+    filename = f"{uuid.uuid4().hex}{extension}"
+
+    upload_dir = Path(__file__).resolve().parent / "uploads" / "student_profiles"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    photo_path = upload_dir / filename
+    relative_photo_path = f"uploads/student_profiles/{filename}"
+
+    # Save photo
+    photo_path.write_bytes(photo_data)
+
+    hashed_password = password_hash.hash(password)
 
     new_user = models.User(
-        name=student.full_name,
-        email=student.email,
+        name=full_name,
+        email=email,
         password_hash=hashed_password,
         role="student",
         is_active=False,
     )
-
-    new_student = None
 
     try:
         db.add(new_user)
@@ -401,17 +451,18 @@ def register_student(
 
         new_student = models.Student(
             user_id=new_user.user_id,
-            full_name=student.full_name,
-            email=student.email,
-            phone=student.phone,
-            date_of_birth=student.date_of_birth,
-            gender=student.gender,
-            address=student.address,
-            qualification=student.qualification,
-            department=student.department,
-            year_of_passing=student.year_of_passing,
-            skills=student.skills,
+            full_name=full_name,
+            email=email,
+            phone=phone,
+            date_of_birth=date_of_birth,
+            gender=gender,
+            address=address,
+            qualification=qualification,
+            department=department,
+            year_of_passing=year_of_passing,
+            skills=skills,
             hashed_password=hashed_password,
+            profile_photo=relative_photo_path,
         )
 
         db.add(new_student)
@@ -420,10 +471,17 @@ def register_student(
 
     except IntegrityError:
         db.rollback()
+        photo_path.unlink(missing_ok=True)
+
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email is already registered",
         )
+
+    except Exception:
+        db.rollback()
+        photo_path.unlink(missing_ok=True)
+        raise
 
     return new_student
 
@@ -1040,22 +1098,11 @@ def get_pending_students(
             "qualification": student.qualification,
             "department": student.department,
             "year_of_passing": student.year_of_passing,
+            "skills": student.skills,
+            "profile_photo": student.profile_photo,
         }
         for student in students
     ]
-
-
-@app.get("/student/me")
-def get_student_profile(
-    student=Depends(require_student),
-):
-    return {
-        "id": student.id,
-        "full_name": student.full_name,
-        "email": student.email,
-        "status": student.status,
-    }
-
 
 @app.post("/employee/jobs", response_model=JobResponse, status_code=201)
 def create_job(
@@ -2379,4 +2426,86 @@ def send_employee_announcement(
     return {
         "message": "Announcement sent successfully",
         "students_notified": len(students)
+    }
+
+@app.get("/employee/students/active")
+def get_active_students(
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    students = db.query(models.Student).filter(
+        models.Student.status == "Active"
+    ).all()
+
+    return [
+        {
+            "id": student.id,
+            "full_name": student.full_name,
+            "email": student.email,
+            "phone": student.phone,
+            "qualification": student.qualification,
+            "department": student.department,
+            "year_of_passing": student.year_of_passing,
+            "skills": student.skills,
+            "profile_photo": student.profile_photo,
+            "status": student.status,
+        }
+        for student in students
+    ]
+
+@app.get("/employee/students/status-history")
+def get_student_status_history(
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    students = db.query(models.Student).filter(
+        models.Student.status.in_(["Active", "Rejected"])
+    ).all()
+
+    return [
+        {
+            "id": student.id,
+            "full_name": student.full_name,
+            "email": student.email,
+            "phone": student.phone,
+            "qualification": student.qualification,
+            "department": student.department,
+            "year_of_passing": student.year_of_passing,
+            "skills": student.skills,
+            "profile_photo": student.profile_photo,
+            "status": student.status,
+        }
+        for student in students
+    ]
+
+@app.get("/employee/students/{student_id}")
+def get_student_profile(
+    student_id: int,
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    student = db.query(models.Student).filter(
+        models.Student.id == student_id
+    ).first()
+
+    if not student:
+        raise HTTPException(
+            status_code=404,
+            detail="Student not found",
+        )
+
+    return {
+        "id": student.id,
+        "full_name": student.full_name,
+        "email": student.email,
+        "phone": student.phone,
+        "date_of_birth": student.date_of_birth,
+        "gender": student.gender,
+        "address": student.address,
+        "qualification": student.qualification,
+        "department": student.department,
+        "year_of_passing": student.year_of_passing,
+        "skills": student.skills,
+        "profile_photo": student.profile_photo,
+        "status": student.status,
     }

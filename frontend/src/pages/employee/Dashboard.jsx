@@ -22,6 +22,24 @@ const dashboardCards = [
     path: '/employee/vacancies',
   },
   {
+  title: 'Verify Students',
+  description: 'Review and approve student registrations.',
+  path: '/employee/pending-students',
+  icon: '⏳',
+},
+{
+  title: 'View Students',
+  description: 'View all approved students and their details.',
+  icon: '🎓',
+  path: '/employee/students',
+},
+{
+  title: 'Student Status History',
+  description: 'View approved and rejected students and manage their account status.',
+  icon: '📊',
+  path: '/employee/students/status-history',
+},
+  {
     title: 'View Applications',
     description: 'Review student applications and access uploaded resumes.',
     icon: '📨',
