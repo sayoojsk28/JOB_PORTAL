@@ -56,8 +56,8 @@ const adminOptions = [
     description: 'View feedback, suggestions and complaints submitted by students.',
     icon: 'file-check',
     color: 'indigo',
-    path: '/admin/student-verification',
-    status: 'Coming soon',
+    path: '/admin/student-feedback',
+    status: 'Available',
   },
   {
   title: 'Send Announcements',

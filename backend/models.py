@@ -2,6 +2,7 @@
 from sqlalchemy import Column, Integer, String, Date , Text,BigInteger, ForeignKey, DateTime, func,Boolean,Time,Float
 from sqlalchemy import text
 from sqlalchemy.orm import relationship
+from sqlalchemy import UniqueConstraint
 from database import Base
 
 
@@ -445,3 +446,36 @@ class StudentFeedback(Base):
         server_default=func.now()
     )
     student = relationship("Student")
+
+class AdminNotificationRead(Base):
+    __tablename__ = "admin_notification_reads"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    admin_id = Column(
+        Integer,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    feedback_id = Column(
+        Integer,
+        ForeignKey("student_feedback.feedback_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    seen_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "admin_id",
+            "feedback_id",
+            name="uq_admin_feedback_seen"
+        ),
+    )

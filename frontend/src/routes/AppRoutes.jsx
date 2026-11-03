@@ -37,6 +37,11 @@ import EmployeeStatus from '../pages/Dashboard/EmployeeStatus';
 import ViewStudents from '../pages/Dashboard/ViewStudents';
 import SendAnnouncements from '../pages/Dashboard/SendAnnouncements';
 import StudentFeedback from '../pages/Student/StudentFeedback';
+import AdminStudentFeedback from '../pages/Dashboard/AdminStudentFeedback';
+import AdminFeedbackDetails from '../pages/Dashboard/AdminFeedbackDetails';
+import EmployeeChangePassword from '../pages/employee/ChangePassword';
+import ViewAdminAnnouncements from '../pages/employee/ViewAdminAnnouncements';
+import EmployeeSendAnnouncements from '../pages/employee/SendAnnouncements';
 
 const AppRoutes = () => {
   return (
@@ -87,8 +92,16 @@ const AppRoutes = () => {
   element={<ViewStudents />}
 />
 <Route
+  path="/admin/student-feedback/:feedbackId"
+  element={<AdminFeedbackDetails />}
+/>
+<Route
   path="/admin/announcements"
   element={<SendAnnouncements />}
+/>
+<Route
+  path="/admin/student-feedback"
+  element={<AdminStudentFeedback />}
 />
 </Route>
 
@@ -163,6 +176,18 @@ const AppRoutes = () => {
 />
 <Route path="/employee/accepted-companies" element={<ViewAcceptedCompanies />} />
 <Route path="/employee/audit-logs" element={<AuditLogs />} />
+<Route
+  path="/employee/change-password"
+  element={<EmployeeChangePassword />}
+/>
+<Route
+  path="/employee/announcements"
+  element={<ViewAdminAnnouncements />}
+/>
+<Route
+  path="/employee/send-announcements"
+  element={<EmployeeSendAnnouncements />}
+/>
 
     </Routes>
   );

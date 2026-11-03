@@ -25,56 +25,82 @@ const Navbar = () => {
     student: '/student/dashboard',
   };
 
-  const dashboardRoute = user
-    ? dashboardRoutes[user.role]
-    : null;
+  const dashboardRoute = user ? dashboardRoutes[user.role] : null;
+  const isDashboardPage = dashboardRoute && location.pathname === dashboardRoute;
 
-  const isDashboardPage =
-    dashboardRoute && location.pathname === dashboardRoute;
-
-  // Fetch student notifications
+  // Student notifications
   const fetchNotifications = async () => {
     if (!isStudent) return;
 
     try {
       setNotificationLoading(true);
-
       const response = await api.get('/student/notifications');
-
       setNotifications(response.data);
     } catch (err) {
-      console.error('Notification fetch error:', err);
+      console.error('Student notification fetch error:', err);
     } finally {
       setNotificationLoading(false);
     }
   };
+
+  // Employee notifications
   const fetchEmployeeNotifications = async () => {
-  if (!isEmployee) return;
+    if (!isEmployee) return;
+
+    try {
+      setNotificationLoading(true);
+      const response = await api.get('/employee/notifications');
+      setNotifications(response.data);
+    } catch (err) {
+      console.error('Employee notification fetch error:', err);
+    } finally {
+      setNotificationLoading(false);
+    }
+  };
+
+  // Admin feedback notifications
+  const fetchAdminNotifications = async () => {
+  if (!isAdmin) return [];
 
   try {
     setNotificationLoading(true);
 
-    const response = await api.get('/employee/notifications');
+    const response = await api.get('/admin/feedback-notifications');
 
     setNotifications(response.data);
+    return response.data;
   } catch (err) {
-    console.error('Employee notification fetch error:', err);
+    console.error('Admin notification fetch error:', err);
+    return [];
   } finally {
     setNotificationLoading(false);
   }
 };
 
-  // Fetch notifications when student logs in
+  // Initial notification fetch
   useEffect(() => {
-  if (isStudent) {
-    fetchNotifications();
-  } else if (isEmployee) {
-    fetchEmployeeNotifications();
-  } else {
-    setNotifications([]);
-    setShowNotifications(false);
-  }
-}, [isStudent, isEmployee]);
+    if (isStudent) {
+      fetchNotifications();
+    } else if (isEmployee) {
+      fetchEmployeeNotifications();
+    } else if (isAdmin) {
+      fetchAdminNotifications();
+    } else {
+      setNotifications([]);
+      setShowNotifications(false);
+    }
+  }, [isStudent, isEmployee, isAdmin]);
+
+  // Automatically refresh admin notifications every 15 seconds
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    const interval = setInterval(() => {
+      fetchAdminNotifications();
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [isAdmin]);
 
   const unreadCount = notifications.filter(
     (item) => !item.is_read
@@ -90,37 +116,58 @@ const Navbar = () => {
     });
   };
 
+  // Notification bell click
   const handleNotificationClick = async () => {
-  const nextState = !showNotifications;
+    const nextState = !showNotifications;
+    setShowNotifications(nextState);
 
-  setShowNotifications(nextState);
+    if (!nextState) return;
 
-  if (nextState) {
     try {
       if (isStudent) {
         await fetchNotifications();
         await api.patch('/student/notifications/read');
+
+        setNotifications((prev) =>
+          prev.map((item) => ({ ...item, is_read: true }))
+        );
       } else if (isEmployee) {
         await fetchEmployeeNotifications();
         await api.patch('/employee/notifications/read');
-      }
 
-      setNotifications((prev) =>
-        prev.map((item) => ({
-          ...item,
-          is_read: true,
-        }))
-      );
+        setNotifications((prev) =>
+          prev.map((item) => ({ ...item, is_read: true }))
+        );
+      } else if (isAdmin) {
+  await fetchAdminNotifications();
+
+  await api.patch('/admin/feedback-notifications/seen');
+
+  setNotifications((prev) =>
+    prev.map((item) => ({ ...item, is_read: true }))
+  );
+}
     } catch (err) {
       console.error('Unable to mark notifications as read:', err);
     }
-  }
-};
+  };
+
+  // Open notification
+  const handleNotificationItemClick = (item) => {
+    if (isAdmin) {
+      setShowNotifications(false);
+
+      navigate(
+        `/admin/student-feedback/${item.feedback_id}`,
+        { state: { feedback: item.feedback } }
+      );
+    }
+  };
 
   const handleSignOut = () => {
-  setShowNotifications(false);
-  logout();
-};
+    setShowNotifications(false);
+    logout();
+  };
 
   return (
     <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
@@ -136,15 +183,15 @@ const Navbar = () => {
 
         <div className="flex items-center gap-2 sm:gap-3">
 
-          {/* Student notifications only */}
-          {(isStudent || isEmployee) && (
+          {/* Notifications */}
+          {(isStudent || isEmployee || isAdmin) && (
             <div className="relative">
 
               <button
                 type="button"
                 onClick={handleNotificationClick}
                 className="relative rounded-xl border border-slate-200 p-3 text-slate-600 transition hover:bg-blue-50 hover:text-blue-700"
-                aria-label={isEmployee ? 'Employee notifications' : 'Student notifications'}
+                aria-label="Notifications"
                 aria-expanded={showNotifications}
               >
                 <svg
@@ -160,7 +207,6 @@ const Navbar = () => {
                   <path d="M10 21h4" />
                 </svg>
 
-                {/* Unread notification count */}
                 {unreadCount > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
                     {unreadCount > 9 ? '9+' : unreadCount}
@@ -213,10 +259,17 @@ const Navbar = () => {
                         </p>
                       ) : (
                         notifications.map((item) => (
-                          <div
+                          <button
                             key={item.notification_id}
-                            className={`border-b border-slate-100 p-4 last:border-b-0 ${
+                            type="button"
+                            onClick={() => handleNotificationItemClick(item)}
+                            disabled={!isAdmin}
+                            className={`w-full border-b border-slate-100 p-4 text-left last:border-b-0 ${
                               !item.is_read ? 'bg-blue-50/70' : 'bg-white'
+                            } ${
+                              isAdmin
+                                ? 'cursor-pointer transition hover:bg-blue-50'
+                                : 'cursor-default'
                             }`}
                           >
                             <div className="flex items-start gap-3">
@@ -239,7 +292,9 @@ const Navbar = () => {
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center justify-between gap-2">
                                   <h4 className="text-sm font-semibold text-slate-800">
-                                    Notification
+                                    {isAdmin
+                                      ? 'New Student Feedback'
+                                      : 'Notification'}
                                   </h4>
 
                                   {!item.is_read && (
@@ -257,7 +312,7 @@ const Navbar = () => {
                               </div>
 
                             </div>
-                          </div>
+                          </button>
                         ))
                       )}
 

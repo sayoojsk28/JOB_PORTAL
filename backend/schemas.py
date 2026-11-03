@@ -228,3 +228,6 @@ class AnnouncementCreate(BaseModel):
 
 class StudentFeedbackCreate(BaseModel):
     message: str
+
+class EmployeeAnnouncementCreate(BaseModel):
+    message: str

@@ -5,6 +5,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from pwdlib import PasswordHash
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 
 from database import engine, Base, SessionLocal
@@ -33,6 +34,7 @@ from schemas import (
     StudentInterviewResultResponse,
     AnnouncementCreate,
     StudentFeedbackCreate,
+    EmployeeAnnouncementCreate
 )
 import os
 import uuid
@@ -2160,3 +2162,221 @@ def get_student_feedback(
         }
         for item in feedbacks
     ]
+
+
+@app.get("/admin/feedback-notifications")
+def get_admin_feedback_notifications(
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(require_admin),
+):
+    # Fetch all student feedback
+    feedbacks = (
+        db.query(models.StudentFeedback)
+        .join(
+            models.Student,
+            models.StudentFeedback.student_id == models.Student.id
+        )
+        .order_by(models.StudentFeedback.created_at.desc())
+        .all()
+    )
+
+    # Fetch feedback notifications already seen by this admin
+    seen_ids = {
+        item.feedback_id
+        for item in db.query(models.AdminNotificationRead.feedback_id)
+        .filter(
+            models.AdminNotificationRead.admin_id == admin.id
+        )
+        .all()
+    }
+
+    return [
+        {
+            "notification_id": item.feedback_id,
+            "feedback_id": item.feedback_id,
+            "student_name": item.student.full_name,
+            "student_email": item.student.email,
+            "message": f"{item.student.full_name} submitted new feedback",
+            "created_at": item.created_at,
+            "is_read": item.feedback_id in seen_ids,
+            "feedback": {
+                "feedback_id": item.feedback_id,
+                "student_name": item.student.full_name,
+                "student_email": item.student.email,
+                "message": item.message,
+                "created_at": item.created_at,
+            }
+        }
+        for item in feedbacks
+    ]
+
+
+@app.patch("/admin/feedback-notifications/seen")
+def mark_admin_feedback_notifications_seen(
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(require_admin),
+):
+    # Get all feedback IDs
+    feedback_ids = [
+        item.feedback_id
+        for item in db.query(models.StudentFeedback.feedback_id).all()
+    ]
+
+    if not feedback_ids:
+        return {
+            "message": "No feedback notifications available",
+            "updated_count": 0
+        }
+
+    # Get feedback IDs already seen by this admin
+    existing_ids = {
+        item.feedback_id
+        for item in db.query(models.AdminNotificationRead.feedback_id)
+        .filter(
+            models.AdminNotificationRead.admin_id == admin.id,
+            models.AdminNotificationRead.feedback_id.in_(feedback_ids)
+        )
+        .all()
+    }
+
+    # Insert only unseen notifications
+    new_records = [
+        {
+            "admin_id": admin.id,
+            "feedback_id": feedback_id
+        }
+        for feedback_id in feedback_ids
+        if feedback_id not in existing_ids
+    ]
+
+    updated_count = 0
+
+    if new_records:
+        statement = (
+            pg_insert(models.AdminNotificationRead)
+            .values(new_records)
+            .on_conflict_do_nothing(
+                index_elements=["admin_id", "feedback_id"]
+            )
+        )
+
+        result = db.execute(statement)
+        updated_count = result.rowcount
+
+    db.commit()
+
+    return {
+        "message": "Admin feedback notifications marked as seen",
+        "updated_count": updated_count
+    }
+@app.post("/auth/employee/change-password")
+def change_employee_password(
+    password_data: AdminChangePassword,
+    employee=Depends(require_employee),
+    db: Session = Depends(get_db),
+):
+    if not password_hash.verify(
+        password_data.current_password,
+        employee.hashed_password,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Current password is incorrect",
+        )
+
+    if password_data.current_password == password_data.new_password:
+        raise HTTPException(
+            status_code=400,
+            detail="New password must be different from current password",
+        )
+
+    user = db.query(models.User).filter(
+        models.User.user_id == employee.user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="Associated user account not found",
+        )
+
+    new_hashed_password = password_hash.hash(
+        password_data.new_password
+    )
+
+    employee.hashed_password = new_hashed_password
+    user.password_hash = new_hashed_password
+
+    db.commit()
+    db.refresh(employee)
+
+    return {
+        "message": "Password changed successfully"
+    }
+
+@app.get("/employee/announcements")
+def get_employee_announcements(
+    employee=Depends(require_employee),
+    db: Session = Depends(get_db),
+):
+    announcements = (
+        db.query(models.EmployeeNotification)
+        .filter(
+            models.EmployeeNotification.employee_id == employee.id
+        )
+        .order_by(
+            models.EmployeeNotification.created_at.desc(),
+            models.EmployeeNotification.notification_id.desc()
+        )
+        .all()
+    )
+
+    return [
+        {
+            "notification_id": item.notification_id,
+            "message": item.message,
+            "created_at": item.created_at,
+        }
+        for item in announcements
+    ]
+
+@app.post("/employee/announcements")
+def send_employee_announcement(
+    announcement: EmployeeAnnouncementCreate,
+    employee=Depends(require_employee),
+    db: Session = Depends(get_db),
+):
+    message = announcement.message.strip()
+
+    if not message:
+        raise HTTPException(
+            status_code=400,
+            detail="Announcement message cannot be empty"
+        )
+
+    if len(message) > 500:
+        raise HTTPException(
+            status_code=400,
+            detail="Announcement cannot exceed 500 characters"
+        )
+
+    students = (
+        db.query(models.Student)
+        .filter(models.Student.status == "Active")
+        .all()
+    )
+
+    for student in students:
+        notification = models.Notification(
+            student_id=student.id,
+            application_id=None,
+            message=message
+        )
+        db.add(notification)
+
+    db.commit()
+
+    return {
+        "message": "Announcement sent successfully",
+        "students_notified": len(students)
+    }
