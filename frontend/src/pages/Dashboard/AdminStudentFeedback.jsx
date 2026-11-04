@@ -6,21 +6,9 @@ import api from '../../services/api';
 export default function AdminStudentFeedback() {
   const [feedbacks, setFeedbacks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [feedbackStatuses, setFeedbackStatuses] = useState({});
-
-  // Load saved statuses
-  useEffect(() => {
-    try {
-      const savedStatuses = localStorage.getItem('studentFeedbackStatuses');
-      if (savedStatuses) {
-        setFeedbackStatuses(JSON.parse(savedStatuses));
-      }
-    } catch {
-      setFeedbackStatuses({});
-    }
-  }, []);
 
   // Fetch feedback
   useEffect(() => {
@@ -41,45 +29,41 @@ export default function AdminStudentFeedback() {
     fetchFeedbacks();
   }, []);
 
-  // Update status
-  const handleStatusChange = (feedbackId, newStatus) => {
-    const updatedStatuses = {
-      ...feedbackStatuses,
-      [feedbackId]: newStatus,
-    };
+  // Delete feedback when marked as Read
+  const handleStatusChange = async (feedbackId) => {
+    try {
+      setErrorMessage('');
+      setDeletingId(feedbackId);
 
-    setFeedbackStatuses(updatedStatuses);
-    localStorage.setItem(
-      'studentFeedbackStatuses',
-      JSON.stringify(updatedStatuses)
-    );
+      await api.delete(`/admin/student-feedback/${feedbackId}`);
+
+      setFeedbacks((previousFeedbacks) =>
+        previousFeedbacks.filter(
+          (item) => item.feedback_id !== feedbackId
+        )
+      );
+    } catch (error) {
+      setErrorMessage(
+        error.response?.data?.detail || 'Failed to delete feedback.'
+      );
+    } finally {
+      setDeletingId(null);
+    }
   };
 
-  // Search and sorting
-  const filteredFeedbacks = feedbacks
-    .filter((item) => {
-      const search = searchTerm.toLowerCase();
+  // Search feedback
+  const filteredFeedbacks = feedbacks.filter((item) => {
+    const search = searchTerm.toLowerCase();
 
-      return (
-        item.student_name.toLowerCase().includes(search) ||
-        item.student_email.toLowerCase().includes(search) ||
-        item.message.toLowerCase().includes(search)
-      );
-    })
-    .sort((a, b) => {
-      const statusA = feedbackStatuses[a.feedback_id] || 'Unread';
-      const statusB = feedbackStatuses[b.feedback_id] || 'Unread';
+    return (
+      item.student_name.toLowerCase().includes(search) ||
+      item.student_email.toLowerCase().includes(search) ||
+      item.message.toLowerCase().includes(search)
+    );
+  });
 
-      if (statusA === statusB) {
-        return new Date(b.created_at) - new Date(a.created_at);
-      }
-
-      return statusA === 'Unread' ? -1 : 1;
-    });
-
-  const unreadCount = feedbacks.filter(
-    (item) => (feedbackStatuses[item.feedback_id] || 'Unread') === 'Unread'
-  ).length;
+  const totalFeedback = feedbacks.length;
+  const unreadCount = feedbacks.length;
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8 sm:px-8">
@@ -107,7 +91,7 @@ export default function AdminStudentFeedback() {
               Total Feedback
             </p>
             <h2 className="mt-2 text-3xl font-bold text-slate-900">
-              {feedbacks.length}
+              {totalFeedback}
             </h2>
           </div>
 
@@ -137,11 +121,13 @@ export default function AdminStudentFeedback() {
 
         {/* Error */}
         {errorMessage && (
-          <p className="text-red-500">{errorMessage}</p>
+          <p className="mb-4 text-sm text-red-500">
+            {errorMessage}
+          </p>
         )}
 
         {/* Feedback Table */}
-        {!loading && !errorMessage && (
+        {!loading && (
           <div className="mt-6 overflow-x-auto rounded-lg border border-gray-200 bg-white">
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-100 text-gray-700">
@@ -150,7 +136,7 @@ export default function AdminStudentFeedback() {
                   <th className="px-5 py-4">Email</th>
                   <th className="px-5 py-4">Feedback</th>
                   <th className="px-5 py-4">Submitted On</th>
-                  <th className="px-5 py-4">Status</th>
+                  <th className="px-5 py-4">Action</th>
                 </tr>
               </thead>
 
@@ -180,20 +166,18 @@ export default function AdminStudentFeedback() {
                     </td>
 
                     <td className="px-5 py-4">
-                      <select
-                        value={feedbackStatuses[item.feedback_id] || 'Unread'}
-                        onChange={(e) =>
-                          handleStatusChange(item.feedback_id, e.target.value)
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleStatusChange(item.feedback_id)
                         }
-                        className={`rounded-lg border px-3 py-2 text-sm font-semibold outline-none ${
-                          (feedbackStatuses[item.feedback_id] || 'Unread') === 'Unread'
-                            ? 'border-amber-200 bg-amber-50 text-amber-700'
-                            : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                        }`}
+                        disabled={deletingId === item.feedback_id}
+                        className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <option value="Unread">Unread</option>
-                        <option value="Read">Read</option>
-                      </select>
+                        {deletingId === item.feedback_id
+                          ? 'Processing...'
+                          : 'Mark as Read'}
+                      </button>
                     </td>
                   </tr>
                 ))}

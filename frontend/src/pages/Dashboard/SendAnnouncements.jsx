@@ -45,7 +45,7 @@ const SendAnnouncements = () => {
       <div className="mx-auto max-w-4xl">
 
         <Link
-          to="/admin"
+          to="/admin/dashboard"
           className="text-sm font-semibold text-blue-700 hover:text-blue-800"
         >
           ← Back to Dashboard

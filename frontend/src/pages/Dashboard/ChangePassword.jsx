@@ -3,6 +3,13 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 
+const validatePassword = (password) => ({
+  length: password.length >= 8,
+  uppercase: /[A-Z]/.test(password),
+  number: /[0-9]/.test(password),
+  special: /[^A-Za-z0-9\s]/.test(password),
+});
+
 const ChangePassword = () => {
   const navigate = useNavigate();
 
@@ -31,8 +38,25 @@ const ChangePassword = () => {
     setError('');
     setSuccess('');
 
-    if (form.new_password.length < 8) {
-      setError('New password must be at least 8 characters long.');
+    const requirements = validatePassword(form.new_password);
+
+    if (!requirements.length) {
+      setError('Password must be at least 8 characters long.');
+      return;
+    }
+
+    if (!requirements.uppercase) {
+      setError('Password must contain at least one uppercase letter.');
+      return;
+    }
+
+    if (!requirements.number) {
+      setError('Password must contain at least one number.');
+      return;
+    }
+
+    if (!requirements.special) {
+      setError('Password must contain at least one special character.');
       return;
     }
 
@@ -166,32 +190,53 @@ const ChangePassword = () => {
               />
 
               <p className="mt-2 text-xs text-slate-500">
-                Use at least 8 characters.
+                Minimum 8 characters, including an uppercase letter, a number and a special character.
               </p>
 
               {form.new_password.length > 0 && (
-                <div className="mt-3">
-                  <div className="mb-1 flex justify-between text-xs">
-                    <span className="text-slate-500">Password length</span>
-                    <span className="font-semibold text-slate-700">
-                      {form.new_password.length}/8 minimum
-                    </span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                <div className="mt-3 space-y-2 rounded-xl bg-slate-50 p-4">
+                  {[
+                    {
+                      label: 'At least 8 characters',
+                      valid: form.new_password.length >= 8,
+                    },
+                    {
+                      label: 'At least one uppercase letter (A-Z)',
+                      valid: /[A-Z]/.test(form.new_password),
+                    },
+                    {
+                      label: 'At least one number (0-9)',
+                      valid: /[0-9]/.test(form.new_password),
+                    },
+                    {
+                      label: 'At least one special character (!@#$...)',
+                      valid: /[^A-Za-z0-9\s]/.test(form.new_password),
+                    },
+                  ].map((rule) => (
                     <div
-                      className={`h-full rounded-full transition-all ${
-                        form.new_password.length >= 8
-                          ? 'w-full bg-emerald-500'
-                          : 'bg-amber-400'
-                      }`}
-                      style={{
-                        width: `${Math.min(
-                          (form.new_password.length / 8) * 100,
-                          100
-                        )}%`,
-                      }}
-                    />
-                  </div>
+                      key={rule.label}
+                      className="flex items-center gap-2 text-xs"
+                    >
+                      <span
+                        className={
+                          rule.valid
+                            ? 'text-emerald-600'
+                            : 'text-slate-400'
+                        }
+                      >
+                        {rule.valid ? '✓' : '○'}
+                      </span>
+                      <span
+                        className={
+                          rule.valid
+                            ? 'text-emerald-700'
+                            : 'text-slate-500'
+                        }
+                      >
+                        {rule.label}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

@@ -653,12 +653,44 @@ def admin_login(login_data: LoginRequest, db: Session = Depends(get_db)):
         "role": "admin"
     }
 
+
 @app.post("/auth/admin/change-password")
 def change_admin_password(
     password_data: AdminChangePassword,
     admin=Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    new_password = password_data.new_password
+
+    # Password length validation
+    if len(new_password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 8 characters long",
+        )
+
+    # Uppercase letter validation
+    if not re.search(r"[A-Z]", new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must contain at least one uppercase letter",
+        )
+
+    # Number validation
+    if not re.search(r"[0-9]", new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must contain at least one number",
+        )
+
+    # Special character validation
+    if not re.search(r"[^A-Za-z0-9\s]", new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must contain at least one special character",
+        )
+
+    # Verify current password
     if not password_hash.verify(
         password_data.current_password,
         admin.hashed_password,
@@ -668,7 +700,8 @@ def change_admin_password(
             detail="Current password is incorrect",
         )
 
-    if password_data.current_password == password_data.new_password:
+    # Ensure new password is different
+    if password_data.current_password == new_password:
         raise HTTPException(
             status_code=400,
             detail="New password must be different from current password",
@@ -684,9 +717,8 @@ def change_admin_password(
             detail="Associated user account not found",
         )
 
-    new_hashed_password = password_hash.hash(
-        password_data.new_password
-    )
+    # Hash and update password
+    new_hashed_password = password_hash.hash(new_password)
 
     admin.hashed_password = new_hashed_password
     user.password_hash = new_hashed_password
@@ -2007,29 +2039,71 @@ def get_employee_audit_logs(
 
 @app.get("/admin/students/active")
 def get_active_students(
+    page: int = 1,
+    limit: int = 10,
+    search: str = "",
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
+    # Validate pagination values
+    page = max(page, 1)
+    limit = min(max(limit, 1), 100)
+
+    # Base query: only active students
+    query = db.query(models.Student).filter(
+        models.Student.status == "Active"
+    )
+
+    # Search across name, email, phone and department
+    search = search.strip()
+
+    if search:
+        search_pattern = f"%{search}%"
+
+        query = query.filter(
+            models.Student.full_name.ilike(search_pattern)
+            | models.Student.email.ilike(search_pattern)
+            | models.Student.phone.ilike(search_pattern)
+            | models.Student.department.ilike(search_pattern)
+        )
+
+    # Total matching students (before pagination)
+    total = query.count()
+
+    # Calculate total pages
+    total_pages = (total + limit - 1) // limit
+
+    # Keep requested page within valid range
+    page = min(page, max(total_pages, 1))
+
+    # Fetch only the required page
     students = (
-        db.query(models.Student)
-        .filter(models.Student.status == "Active")
+        query
         .order_by(models.Student.id.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
         .all()
     )
 
-    return [
-        {
-            "id": student.id,
-            "full_name": student.full_name,
-            "email": student.email,
-            "phone": student.phone,
-            "qualification": student.qualification,
-            "department": student.department,
-            "year_of_passing": student.year_of_passing,
-            "status": student.status,
-        }
-        for student in students
-    ]
+    return {
+        "students": [
+            {
+                "id": student.id,
+                "full_name": student.full_name,
+                "email": student.email,
+                "phone": student.phone,
+                "qualification": student.qualification,
+                "department": student.department,
+                "year_of_passing": student.year_of_passing,
+                "status": student.status,
+            }
+            for student in students
+        ],
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages,
+    }
 
 @app.get("/employee/notifications")
 def get_employee_notifications(
@@ -2479,6 +2553,38 @@ def get_student_status_history(
         for student in students
     ]
 
+@app.get("/admin/students/{student_id}")
+def get_admin_student_profile(
+    student_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    student = db.query(models.Student).filter(
+        models.Student.id == student_id
+    ).first()
+
+    if not student:
+        raise HTTPException(
+            status_code=404,
+            detail="Student not found",
+        )
+
+    return {
+        "id": student.id,
+        "full_name": student.full_name,
+        "email": student.email,
+        "phone": student.phone,
+        "date_of_birth": student.date_of_birth,
+        "gender": student.gender,
+        "address": student.address,
+        "qualification": student.qualification,
+        "department": student.department,
+        "year_of_passing": student.year_of_passing,
+        "skills": student.skills,
+        "profile_photo": student.profile_photo,
+        "status": student.status,
+    }
+
 @app.get("/employee/students/{student_id}")
 def get_student_profile(
     student_id: int,
@@ -2655,3 +2761,28 @@ def change_student_password(
     return {
         "message": "Password changed successfully"
     }
+
+
+@app.delete("/admin/student-feedback/{feedback_id}")
+def delete_student_feedback(
+    feedback_id: int,
+    db: Session = Depends(get_db),
+    admin: models.Admin = Depends(require_admin),
+):
+    feedback = db.query(models.StudentFeedback).filter(
+        models.StudentFeedback.feedback_id == feedback_id
+    ).first()
+
+    if not feedback:
+        raise HTTPException(
+            status_code=404,
+            detail="Feedback not found",
+        )
+
+    db.delete(feedback)
+    db.commit()
+
+    return {
+        "message": "Feedback deleted successfully"
+    }
+

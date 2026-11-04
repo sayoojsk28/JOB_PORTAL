@@ -97,7 +97,7 @@ if (error) {
       <div className="mx-auto max-w-7xl">
         <div className="mb-8">
           <Link
-            to="/admin"
+            to="/admin/dashboard"
             className="text-sm font-semibold text-blue-700 hover:text-blue-800"
           >
             ← Back to Dashboard
