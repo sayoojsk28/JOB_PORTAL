@@ -47,6 +47,11 @@ import PendingStudents from '../pages/employee/PendingStudents';
 import EmployeeViewStudents from '../pages/employee/ViewStudents';
 import StudentStatus from '../pages/employee/StudentStatus';
 import StudentProfile from '../pages/employee/StudentProfile';
+import StudentMyProfile from '../pages/student/StudentMyProfile';
+import ViewAnnouncements from '../pages/student/ViewAnnouncements';
+import AppliedJobsHistory from '../pages/student/AppliedJobsHistory';
+import StudentChangePassword from '../pages/student/StudentChangePassword';
+
 
 const AppRoutes = () => {
   return (
@@ -167,6 +172,23 @@ const AppRoutes = () => {
           path="/student/feedback"
           element={<StudentFeedback />}
         />
+
+        <Route
+  path="/student/my-profile"
+  element={<StudentMyProfile />}
+/>
+<Route
+  path="/student/announcements"
+  element={<ViewAnnouncements />}
+/>
+<Route
+  path="/student/applied-jobs-history"
+  element={<AppliedJobsHistory />}
+/>
+<Route
+  path="/student/change-password"
+  element={<StudentChangePassword />}
+/>
 
       </Route>
 

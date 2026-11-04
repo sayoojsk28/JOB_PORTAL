@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from pwdlib import PasswordHash
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+import re
 
 
 from database import engine, Base, SessionLocal
@@ -2508,4 +2509,149 @@ def get_student_profile(
         "skills": student.skills,
         "profile_photo": student.profile_photo,
         "status": student.status,
+    }
+
+@app.get("/student/my-profile")
+def get_my_student_profile(
+    current_user=Depends(require_student),
+):
+    return {
+        "id": current_user.id,
+        "full_name": current_user.full_name,
+        "profile_photo": current_user.profile_photo,
+    }
+
+
+@app.get("/student/announcements")
+def get_student_announcements(
+    student=Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    announcements = (
+        db.query(models.Notification)
+        .filter(
+            models.Notification.student_id == student.id,
+            models.Notification.application_id.is_(None)
+        )
+        .order_by(
+            models.Notification.created_at.desc(),
+            models.Notification.notification_id.desc()
+        )
+        .all()
+    )
+
+    return [
+        {
+            "notification_id": item.notification_id,
+            "message": item.message,
+            "created_at": item.created_at,
+        }
+        for item in announcements
+    ]
+
+@app.get("/student/applications/history")
+def get_my_application_history(
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    applications = (
+        db.query(models.Application)
+        .filter(models.Application.student_id == student.id)
+        .order_by(models.Application.applied_at.desc())
+        .all()
+    )
+
+    result = []
+
+    for application in applications:
+        vacancy = db.query(models.Vacancy).filter(
+            models.Vacancy.id == application.vacancy_id
+        ).first()
+
+        company = None
+
+        if vacancy:
+            company = db.query(models.Company).filter(
+                models.Company.id == vacancy.company_id
+            ).first()
+
+        result.append({
+            "application_id": application.application_id,
+            "vacancy_id": application.vacancy_id,
+            "vacancy_title": vacancy.title if vacancy else None,
+            "company_name": company.name if company else None,
+            "status": application.status,
+            "applied_at": application.applied_at,
+        })
+
+    return result
+
+
+@app.post("/auth/student/change-password")
+def change_student_password(
+    password_data: AdminChangePassword,
+    student=Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    if not password_hash.verify(
+        password_data.current_password,
+        student.hashed_password,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Current password is incorrect",
+        )
+
+    if password_data.current_password == password_data.new_password:
+        raise HTTPException(
+            status_code=400,
+            detail="New password must be different from current password",
+        )
+
+    new_password = password_data.new_password
+
+    if len(new_password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 8 characters long",
+        )
+
+    if not re.search(r"[A-Z]", new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must contain at least one uppercase letter",
+        )
+
+    if not re.search(r"[0-9]", new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must contain at least one number",
+        )
+
+    if not re.search(r"[^A-Za-z0-9]", new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must contain at least one special character",
+        )
+
+    user = db.query(models.User).filter(
+        models.User.user_id == student.user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="Associated user account not found",
+        )
+
+    new_hashed_password = password_hash.hash(new_password)
+
+    student.hashed_password = new_hashed_password
+    user.password_hash = new_hashed_password
+
+    db.commit()
+    db.refresh(student)
+
+    return {
+        "message": "Password changed successfully"
     }

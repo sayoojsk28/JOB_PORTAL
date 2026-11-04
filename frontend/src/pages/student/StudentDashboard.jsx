@@ -16,10 +16,11 @@ const dashboardCards = [
   path: '/student/interviews',
 },
   {
-    title: 'Applied Jobs History',
-    description: 'Keep track of the jobs you have applied for.',
-    icon: '📋',
-  },
+  title: 'Applied Jobs History',
+  description: 'Keep track of the jobs you have applied for.',
+  icon: '📋',
+  path: '/student/applied-jobs-history',
+},
   {
   title: 'Interview History & Results',
   description: 'Review completed interviews and published results.',
@@ -30,12 +31,14 @@ const dashboardCards = [
     title: 'My Profile & Resume',
     description: 'Manage your personal details, profile photo and resume.',
     icon: '👤',
+    path:'/student/my-profile'
   },
   {
-    title: 'Reset Password',
-    description: 'Change your account password securely.',
-    icon: '🔐',
-  },
+  title: 'Reset Password',
+  description: 'Change your account password securely.',
+  icon: '🔐',
+  path: '/student/change-password',
+},
   {
   title: 'Job Portal AI Assistant',
   description: 'Get help and answers about using the job portal.',
@@ -47,6 +50,12 @@ const dashboardCards = [
   description: 'Share your suggestions, feedback or complaints with the admin.',
   icon: '💬',
   path: '/student/feedback',
+},
+{
+  title: 'Announcements',
+  description: 'View important updates and information from the administration.',
+  icon: '📢',
+  path: '/student/announcements',
 },
 ];
 
