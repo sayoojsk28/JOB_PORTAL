@@ -38,7 +38,7 @@ export default function StudentFeedback() {
       <div className="mx-auto max-w-3xl">
 
         <Link
-          to="/student"
+          to="/student/dashboard"
           className="text-sm font-semibold text-blue-600 hover:text-blue-800"
         >
           ← Back to Dashboard

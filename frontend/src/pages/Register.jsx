@@ -80,33 +80,90 @@ const Register = () => {
 
   const strength = passwordChecks.filter(Boolean).length;
 
+  const scrollToFirstInvalidField = (fieldIds) => {
+  const fields = fieldIds
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+
+  if (fields.length === 0) return;
+
+  // Find the topmost invalid field
+  fields.sort(
+    (a, b) =>
+      a.getBoundingClientRect().top -
+      b.getBoundingClientRect().top
+  );
+
+  const firstField = fields[0];
+
+  firstField.scrollIntoView({
+    behavior: 'smooth',
+    block: 'center',
+  });
+
+  firstField.focus({ preventScroll: true });
+};
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
     setError('');
     setSuccess('');
 
-    if (form.password.length < 8) {
-      setError('Password must contain at least 8 characters.');
-      return;
-    }
+    const validationErrors = [];
 
-    if (!/[A-Z]/.test(form.password) || !/\d/.test(form.password)) {
-      setError(
-        'Password must include at least one uppercase letter and one number.'
-      );
-      return;
-    }
+const phone = form.phone.trim();
 
-    if (form.password !== form.confirmPassword) {
-      setError('Passwords do not match. Please check both fields.');
-      return;
-    }
+// Phone validation
+if (!/^[0-9+-]+$/.test(phone)) {
+  validationErrors.push({
+    fieldId: 'phone',
+    message: 'Phone number can contain only digits, plus (+) and hyphens (-).',
+  });
+}
 
-    if (!profilePhoto && role === 'student') {
-      setError('Please upload your profile photo.');
-      return;
-    }
+// Password length
+if (form.password.length < 8) {
+  validationErrors.push({
+    fieldId: 'password',
+    message: 'Password must contain at least 8 characters.',
+  });
+}
+
+// Password uppercase and number
+if (!/[A-Z]/.test(form.password) || !/\d/.test(form.password)) {
+  validationErrors.push({
+    fieldId: 'password',
+    message: 'Password must include at least one uppercase letter and one number.',
+  });
+}
+
+// Confirm password
+if (form.password !== form.confirmPassword) {
+  validationErrors.push({
+    fieldId: 'confirmPassword',
+    message: 'Passwords do not match.',
+  });
+}
+
+// Student profile photo
+if (!profilePhoto && role === 'student') {
+  validationErrors.push({
+    fieldId: 'student_photo',
+    message: 'Please upload your profile photo.',
+  });
+}
+
+// Handle all validation errors
+if (validationErrors.length > 0) {
+  setError(validationErrors.map((item) => item.message).join(' '));
+
+  scrollToFirstInvalidField(
+    validationErrors.map((item) => item.fieldId)
+  );
+
+  return;
+}
 
     const endpoint =
       role === 'student' ? '/students/register' : '/employees/register';
@@ -296,23 +353,24 @@ const Register = () => {
               </div>
 
               <div>
-                <label className={labelClass} htmlFor="phone">
-                  Phone number
-                </label>
-                <input
-                  className={inputClass}
-                  id="phone"
-                  name="phone"
-                  type="tel"
-                  value={form.phone}
-                  onChange={handleChange}
-                  placeholder="Enter phone number"
-                  minLength={7}
-                  maxLength={20}
-                  autoComplete="tel"
-                  required
-                />
-              </div>
+  <label className={labelClass} htmlFor="phone">
+    Phone number
+  </label>
+
+  <input
+    className={inputClass}
+    id="phone"
+    name="phone"
+    type="tel"
+    value={form.phone}
+    onChange={handleChange}
+    placeholder="Enter phone number"
+    pattern="[0-9+-]+"
+    title="Only numbers, plus (+) and hyphens (-) are allowed."
+    autoComplete="tel"
+    required
+  />
+</div>
 
               {role === 'employee' && (
                 <div>

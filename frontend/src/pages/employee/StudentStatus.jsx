@@ -7,6 +7,8 @@ const StudentStatus = () => {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [selectedStatus, setSelectedStatus] = useState('');
@@ -84,6 +86,21 @@ const StudentStatus = () => {
     setSelectedStatus('');
   };
 
+  const filteredStudents = students.filter((student) => {
+    const searchText = search.toLowerCase().trim();
+
+    return (
+      String(student.id).includes(searchText) ||
+      String(student.full_name || '').toLowerCase().includes(searchText) ||
+      String(student.email || '').toLowerCase().includes(searchText) ||
+      String(student.phone || '').toLowerCase().includes(searchText) ||
+      String(student.qualification || '').toLowerCase().includes(searchText) ||
+      String(student.department || '').toLowerCase().includes(searchText) ||
+      String(student.year_of_passing || '').toLowerCase().includes(searchText) ||
+      String(student.status || '').toLowerCase().includes(searchText)
+    );
+  });
+
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-50 p-8 text-center">
@@ -94,7 +111,7 @@ const StudentStatus = () => {
     );
   }
 
-  if (error) {
+  if (error && !students.length) {
     return (
       <main className="min-h-screen bg-slate-50 p-8 text-center">
         <p className="text-red-600">{error}</p>
@@ -106,6 +123,7 @@ const StudentStatus = () => {
     <main className="min-h-[calc(100vh-76px)] bg-slate-50 px-4 py-8 sm:px-8 sm:py-10">
       <div className="mx-auto max-w-7xl">
 
+        {/* Header */}
         <div className="mb-8">
           <Link
             to="/employee/dashboard"
@@ -123,88 +141,145 @@ const StudentStatus = () => {
           </p>
         </div>
 
-        {students.length === 0 ? (
-          <div className="rounded-2xl border border-slate-200 bg-white py-12 text-center shadow-sm">
-            <p className="text-slate-500">
-              No student status history found.
+        {/* Search */}
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, email, phone, department, status..."
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 sm:max-w-md"
+          />
+
+          <p className="text-sm text-slate-500">
+            {filteredStudents.length} of {students.length} students
+          </p>
+        </div>
+
+        {error && (
+          <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        {/* Students Table */}
+        {filteredStudents.length === 0 ? (
+          <div className="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center">
+            <p className="text-lg font-semibold text-slate-700">
+              {students.length === 0
+                ? 'No Student Status History Found'
+                : 'No Matching Students Found'}
+            </p>
+
+            <p className="mt-2 text-sm text-slate-500">
+              {students.length === 0
+                ? 'Student status records will appear here.'
+                : 'Try searching with a different keyword.'}
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {students.map((student) => (
-              <div
-                key={student.id}
-                className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-bold text-slate-900">
-                      {student.full_name}
-                    </h2>
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-left">
 
-                    <p className="mt-1 text-sm text-slate-500">
-                      {student.qualification}
-                    </p>
-                  </div>
+                <thead className="bg-slate-100">
+                  <tr>
+                    <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Student ID
+                    </th>
 
-                  <select
-                    value={student.status}
-                    onChange={(e) =>
-                      openStatusConfirm(student, e.target.value)
-                    }
-                    className={`rounded-xl border px-3 py-2 text-sm font-semibold outline-none ${
-                      student.status === 'Active'
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                        : 'border-red-200 bg-red-50 text-red-700'
-                    }`}
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Rejected">Rejected</option>
-                  </select>
-                </div>
+                    <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Name
+                    </th>
 
-                <div className="mt-5 space-y-3 border-t border-slate-100 pt-4 text-sm">
-                  <p className="text-slate-600">
-                    <span className="font-semibold text-slate-800">
-                      Student ID:
-                    </span>{' '}
-                    {student.id}
-                  </p>
+                    <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Email
+                    </th>
 
-                  <p className="text-slate-600">
-                    <span className="font-semibold text-slate-800">
-                      Email:
-                    </span>{' '}
-                    {student.email}
-                  </p>
+                    <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Phone
+                    </th>
 
-                  <p className="text-slate-600">
-                    <span className="font-semibold text-slate-800">
-                      Phone:
-                    </span>{' '}
-                    {student.phone}
-                  </p>
+                    <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Qualification
+                    </th>
 
-                  <p className="text-slate-600">
-                    <span className="font-semibold text-slate-800">
-                      Department:
-                    </span>{' '}
-                    {student.department}
-                  </p>
+                    <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Department
+                    </th>
 
-                  <p className="text-slate-600">
-                    <span className="font-semibold text-slate-800">
-                      Passing Year:
-                    </span>{' '}
-                    {student.year_of_passing}
-                  </p>
-                </div>
-              </div>
-            ))}
+                    <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Passing Year
+                    </th>
+
+                    <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-100">
+                  {filteredStudents.map((student) => (
+                    <tr
+                      key={student.id}
+                      className="transition hover:bg-slate-50"
+                    >
+                      <td className="whitespace-nowrap px-5 py-4 text-sm font-medium text-slate-700">
+                        #{student.id}
+                      </td>
+
+                      <td className="whitespace-nowrap px-5 py-4 text-sm font-semibold text-slate-800">
+                        {student.full_name}
+                      </td>
+
+                      <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
+                        {student.email}
+                      </td>
+
+                      <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
+                        {student.phone || '—'}
+                      </td>
+
+                      <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
+                        {student.qualification || '—'}
+                      </td>
+
+                      <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
+                        {student.department || '—'}
+                      </td>
+
+                      <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
+                        {student.year_of_passing || '—'}
+                      </td>
+
+                      <td className="whitespace-nowrap px-5 py-4">
+                        <select
+                          value={student.status}
+                          onChange={(e) =>
+                            openStatusConfirm(student, e.target.value)
+                          }
+                          className={`rounded-lg border px-3 py-2 text-sm font-semibold outline-none ${
+                            student.status === 'Active'
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                              : 'border-red-200 bg-red-50 text-red-700'
+                          }`}
+                        >
+                          <option value="Active">Active</option>
+                          <option value="Rejected">Rejected</option>
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+
+              </table>
+            </div>
           </div>
         )}
+
       </div>
 
+      {/* Confirmation Dialog */}
       {showConfirmDialog && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/50 px-4 backdrop-blur-sm">
           <div

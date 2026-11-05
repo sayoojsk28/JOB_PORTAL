@@ -49,6 +49,7 @@ from fastapi import Body
 from pathlib import Path
 from datetime import date
 import jwt
+from fastapi import Query
 os.makedirs("uploads/employee_photos", exist_ok=True)
 
 
@@ -2002,40 +2003,87 @@ def get_student_interview_results(
 
 @app.get("/admin/audit-logs")
 def get_audit_logs(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
+    query = db.query(models.AuditLog)
+
+    total = query.count()
+
     logs = (
-        db.query(models.AuditLog)
+        query
         .order_by(models.AuditLog.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
         .all()
     )
 
-    return logs
+    total_pages = (total + limit - 1) // limit
 
+    return {
+        "logs": logs,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages,
+    }
 
 
 @app.get("/employee/audit-logs")
 def get_employee_audit_logs(
+    page: int = 1,
+    limit: int = 10,
     db: Session = Depends(get_db),
     employee=Depends(require_employee),
 ):
-    logs = (
-        db.query(models.AuditLog)
-        .filter(
-            models.AuditLog.user_id == employee.user_id,
-            models.AuditLog.action.in_([
-                "LOGIN_SUCCESS",
-                "LOGIN_FAILED",
-                "LOGIN_BLOCKED",
-                "STUDENT_STATUS_UPDATED",
-            ])
+    # Validate pagination
+    if page < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Page must be greater than 0"
         )
+
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="Limit must be between 1 and 100"
+        )
+
+    # Base query
+    query = db.query(models.AuditLog).filter(
+        models.AuditLog.user_id == employee.user_id,
+        models.AuditLog.action.in_([
+            "LOGIN_SUCCESS",
+            "LOGIN_FAILED",
+            "LOGIN_BLOCKED",
+            "STUDENT_STATUS_UPDATED",
+        ])
+    )
+
+    # Total number of logs
+    total = query.count()
+
+    # Calculate total pages
+    total_pages = (total + limit - 1) // limit
+
+    # Fetch paginated logs
+    logs = (
+        query
         .order_by(models.AuditLog.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
         .all()
     )
 
-    return logs
+    return {
+        "logs": logs,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages
+    }
 
 @app.get("/admin/students/active")
 def get_active_students(

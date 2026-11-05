@@ -10,6 +10,13 @@ const AuditLogs = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const limit = 10;
+
   useEffect(() => {
     if (authLoading) return;
 
@@ -36,8 +43,14 @@ const AuditLogs = () => {
         setLoading(true);
         setError('');
 
-        const response = await api.get(endpoint);
-        setLogs(response.data);
+        const response = await api.get(endpoint, {
+          params: { page, limit },
+        });
+
+        setLogs(response.data.logs);
+        setTotal(response.data.total);
+        setTotalPages(response.data.total_pages);
+
       } catch (err) {
         setError(
           err.response?.data?.detail ||
@@ -49,7 +62,15 @@ const AuditLogs = () => {
     };
 
     fetchAuditLogs();
-  }, [user, authLoading]);
+  }, [user, authLoading, page, refreshKey]);
+
+  const handleRefresh = () => {
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      setRefreshKey((prev) => prev + 1);
+    }
+  };
 
   const formatDate = (date) => {
     if (!date) return '—';
@@ -68,8 +89,11 @@ const AuditLogs = () => {
       return 'bg-green-100 text-green-700';
     }
 
-    if (action?.includes('FAILED') || action?.includes('BLOCKED') ||
-        action?.includes('REJECTED')) {
+    if (
+      action?.includes('FAILED') ||
+      action?.includes('BLOCKED') ||
+      action?.includes('REJECTED')
+    ) {
       return 'bg-red-100 text-red-700';
     }
 
@@ -113,13 +137,14 @@ const AuditLogs = () => {
                 <p className="text-sm font-semibold text-slate-800">
                   Activity History
                 </p>
+
                 <p className="mt-1 text-xs text-slate-500">
-                  {logs.length} {logs.length === 1 ? 'record' : 'records'} found
+                  {total} {total === 1 ? 'record' : 'records'} found
                 </p>
               </div>
 
               <button
-                onClick={() => window.location.reload()}
+                onClick={handleRefresh}
                 className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
               >
                 ↻ Refresh
@@ -131,84 +156,128 @@ const AuditLogs = () => {
                 <p className="text-lg font-semibold text-slate-700">
                   No audit logs found
                 </p>
+
                 <p className="mt-2 text-sm text-slate-500">
                   Activity records will appear here when actions are performed.
                 </p>
               </div>
             ) : (
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-slate-200 text-left">
-                    <thead className="bg-slate-100">
-                      <tr>
-                        <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                          ID
-                        </th>
-                        <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                          Action
-                        </th>
-                        <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                          Target
-                        </th>
-                        <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                          Details
-                        </th>
-                        {user?.role === 'admin' && (
+              <>
+                <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-left">
+                      <thead className="bg-slate-100">
+                        <tr>
                           <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                            User ID
+                            ID
                           </th>
-                        )}
-                        <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                          IP Address
-                        </th>
-                        <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                          Date & Time
-                        </th>
-                      </tr>
-                    </thead>
 
-                    <tbody className="divide-y divide-slate-100">
-                      {logs.map((log) => (
-                        <tr key={log.log_id} className="transition hover:bg-slate-50">
-                          <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">
-                            #{log.log_id}
-                          </td>
+                          <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                            Action
+                          </th>
 
-                          <td className="whitespace-nowrap px-5 py-4">
-                            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${getActionStyle(log.action)}`}>
-                              {log.action}
-                            </span>
-                          </td>
+                          <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                            Target
+                          </th>
 
-                          <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
-                            {log.target_type
-                              ? `${log.target_type} #${log.target_id ?? '—'}`
-                              : '—'}
-                          </td>
-
-                          <td className="max-w-xs px-5 py-4 text-sm text-slate-600">
-                            {log.details || '—'}
-                          </td>
+                          <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                            Details
+                          </th>
 
                           {user?.role === 'admin' && (
-                            <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
-                              {log.user_id ?? 'Unknown'}
-                            </td>
+                            <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                              User ID
+                            </th>
                           )}
 
-                          <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">
-                            {log.ip_address || '—'}
-                          </td>
+                          <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                            IP Address
+                          </th>
 
-                          <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">
-                            {formatDate(log.created_at)}
-                          </td>
+                          <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                            Date & Time
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+
+                      <tbody className="divide-y divide-slate-100">
+                        {logs.map((log) => (
+                          <tr
+                            key={log.log_id}
+                            className="transition hover:bg-slate-50"
+                          >
+                            <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">
+                              #{log.log_id}
+                            </td>
+
+                            <td className="whitespace-nowrap px-5 py-4">
+                              <span
+                                className={`rounded-full px-3 py-1 text-xs font-semibold ${getActionStyle(log.action)}`}
+                              >
+                                {log.action}
+                              </span>
+                            </td>
+
+                            <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
+                              {log.target_type
+                                ? `${log.target_type} #${log.target_id ?? '—'}`
+                                : '—'}
+                            </td>
+
+                            <td className="max-w-xs px-5 py-4 text-sm text-slate-600">
+                              {log.details || '—'}
+                            </td>
+
+                            {user?.role === 'admin' && (
+                              <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
+                                {log.user_id ?? 'Unknown'}
+                              </td>
+                            )}
+
+                            <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">
+                              {log.ip_address || '—'}
+                            </td>
+
+                            <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">
+                              {formatDate(log.created_at)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+
+                {/* Pagination */}
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
+                  <p className="text-sm text-slate-500">
+                    Showing {(page - 1) * limit + 1} to{' '}
+                    {Math.min(page * limit, total)} of {total} records
+                  </p>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setPage((prev) => prev - 1)}
+                      disabled={page === 1}
+                      className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+
+                    <span className="text-sm font-medium text-slate-700">
+                      Page {page} of {totalPages}
+                    </span>
+
+                    <button
+                      onClick={() => setPage((prev) => prev + 1)}
+                      disabled={page >= totalPages}
+                      className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
           </>
         )}
