@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Depends, HTTPException, status
 
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from pwdlib import PasswordHash
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -107,7 +108,55 @@ def log_action(
     )
 
     db.add(audit_log)
+def get_student_rejection_count(
+    db: Session,
+    student_id: int
+) -> int:
 
+    # Find the latest completed training cycle
+    last_completed_at = (
+        db.query(
+            func.max(models.TrainingEnrollment.completed_at)
+        )
+        .filter(
+            models.TrainingEnrollment.student_id == student_id,
+            models.TrainingEnrollment.completed_at.isnot(None)
+        )
+        .scalar()
+    )
+
+    # Count distinct rejected applications
+    query = (
+        db.query(
+            func.count(
+                func.distinct(models.Application.application_id)
+            )
+        )
+        .join(
+            models.Interview,
+            models.Interview.application_id
+            == models.Application.application_id
+        )
+        .join(
+            models.InterviewResult,
+            models.InterviewResult.interview_id
+            == models.Interview.interview_id
+        )
+        .filter(
+            models.Application.student_id == student_id,
+            models.InterviewResult.result == "Rejected",
+            models.InterviewResult.is_published.is_(True)
+        )
+    )
+
+    # For subsequent cycles, count only applications
+    # submitted after the previous training completion
+    if last_completed_at is not None:
+        query = query.filter(
+            models.Application.applied_at > last_completed_at
+        )
+
+    return query.scalar() or 0
 Base.metadata.create_all(bind=engine)
 
 

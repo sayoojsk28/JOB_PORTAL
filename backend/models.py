@@ -415,6 +415,12 @@ class EmployeeNotification(Base):
         ForeignKey("employees.id"),
         nullable=False
     )
+    training_eligibility_id = Column(
+    Integer,
+    ForeignKey("training_eligibility.id"),
+    nullable=True,
+    index=True
+)
     message = Column(String(500), nullable=False)
     is_read = Column(
         Boolean,
@@ -528,6 +534,17 @@ class TrainingEligibility(Base):
     )
 
     reviewed_at = Column(DateTime, nullable=True)
+
+    claimed_by = Column(
+    Integer,
+    ForeignKey("employees.id"),
+    nullable=True
+    )
+
+    claimed_at = Column(
+    DateTime(timezone=True),
+    nullable=True
+    )
 
     created_at = Column(
         DateTime,
