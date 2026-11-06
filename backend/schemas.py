@@ -232,3 +232,120 @@ class StudentFeedbackCreate(BaseModel):
 
 class EmployeeAnnouncementCreate(BaseModel):
     message: str
+
+class TrainingEligibilityResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    student_id: int
+    rejected_application_count: int
+    cycle_number: int
+    status: str
+    reviewed_by: int | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+
+
+class TrainingEligibilityReview(BaseModel):
+    status: str = Field(pattern="^(Approved|Rejected)$")
+
+class TrainingCourseCreate(BaseModel):
+    course_type: str = Field(pattern="^(Coding|Non-Coding)$")
+    job_role: str = Field(min_length=2, max_length=150)
+
+
+class TrainingCourseResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    course_type: str
+    job_role: str
+    created_by: int
+    created_at: datetime
+    status: str
+
+class TrainingEnrollmentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    eligibility_id: int
+    student_id: int
+    course_id: int
+    status: str
+    enrolled_at: datetime
+    completed_at: datetime | None = None
+
+class TrainingResumeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    student_id: int
+    file_type: str
+    file_size: int
+    file_path: str
+    uploaded_at: datetime
+    is_active: bool
+    processing_status: str
+
+class TrainingPartResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    enrollment_id: int
+    part_number: int
+    title: str
+    pdf_path: str | None = None
+    generation_status: str
+    generated_at: datetime | None = None
+    created_at: datetime
+
+class TrainingQuestionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    part_id: int
+    question: str
+    option_a: str
+    option_b: str
+    option_c: str
+    option_d: str
+
+
+class TrainingQuestionInternal(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    part_id: int
+    question: str
+    option_a: str
+    option_b: str
+    option_c: str
+    option_d: str
+    correct_option: str
+    explanation: str | None = None
+
+class TrainingAttemptResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    part_id: int
+    student_id: int
+    attempt_number: int
+    started_at: datetime
+    expires_at: datetime
+    submitted_at: datetime | None = None
+    score: int | None = None
+    status: str
+
+
+class TrainingAnswerSubmit(BaseModel):
+    question_id: int
+    selected_option: str = Field(pattern="^[A-D]$")
+
+
+class TrainingExamResult(BaseModel):
+    attempt_id: int
+    score: int
+    total_questions: int = 50
+    passed: bool
+    status: str

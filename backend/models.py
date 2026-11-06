@@ -480,3 +480,373 @@ class AdminNotificationRead(Base):
             name="uq_admin_feedback_seen"
         ),
     )
+
+
+class TrainingEligibility(Base):
+    __tablename__ = "training_eligibility"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "student_id",
+            "cycle_number",
+            name="uq_training_eligibility_student_cycle"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    student_id = Column(
+        Integer,
+        ForeignKey("students.id"),
+        nullable=False,
+        index=True,
+    )
+
+    rejected_application_count = Column(
+        Integer,
+        nullable=False,
+        default=3,
+    )
+
+    cycle_number = Column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+
+    status = Column(
+        String(20),
+        nullable=False,
+        default="Pending",
+        server_default=text("'Pending'"),
+    )
+
+    reviewed_by = Column(
+        Integer,
+        ForeignKey("employees.id"),
+        nullable=True,
+    )
+
+    reviewed_at = Column(DateTime, nullable=True)
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+class TrainingCourse(Base):
+    __tablename__ = "training_courses"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    course_type = Column(
+        String(20),
+        nullable=False,
+    )
+
+    job_role = Column(
+        String(150),
+        nullable=False,
+    )
+
+    created_by = Column(
+        Integer,
+        ForeignKey("employees.id"),
+        nullable=False,
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    status = Column(
+        String(20),
+        nullable=False,
+        default="Active",
+        server_default=text("'Active'"),
+    )
+
+
+class TrainingEnrollment(Base):
+    __tablename__ = "training_enrollments"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "eligibility_id",
+            name="uq_training_enrollment_eligibility"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    eligibility_id = Column(
+        Integer,
+        ForeignKey("training_eligibility.id"),
+        nullable=False,
+    )
+
+    student_id = Column(
+        Integer,
+        ForeignKey("students.id"),
+        nullable=False,
+        index=True,
+    )
+
+    course_id = Column(
+        Integer,
+        ForeignKey("training_courses.id"),
+        nullable=False,
+    )
+
+    status = Column(
+        String(20),
+        nullable=False,
+        default="Active",
+        server_default=text("'Active'"),
+    )
+
+    enrolled_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    completed_at = Column(
+        DateTime,
+        nullable=True,
+    )
+
+class TrainingResume(Base):
+    __tablename__ = "training_resumes"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    student_id = Column(
+        Integer,
+        ForeignKey("students.id"),
+        nullable=False,
+        index=True,
+    )
+
+    file_type = Column(
+        String(50),
+        nullable=False,
+    )
+
+    file_size = Column(
+        BigInteger,
+        nullable=False,
+    )
+
+    file_path = Column(
+        String(500),
+        nullable=False,
+    )
+
+    uploaded_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+
+    processing_status = Column(
+        String(20),
+        nullable=False,
+        default="Pending",
+        server_default=text("'Pending'"),
+    )
+
+    extracted_skills = Column(
+        Text,
+        nullable=True,
+    )
+
+class TrainingPart(Base):
+    __tablename__ = "training_parts"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "enrollment_id",
+            "part_number",
+            name="uq_training_part_enrollment_number"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    enrollment_id = Column(
+        Integer,
+        ForeignKey("training_enrollments.id"),
+        nullable=False,
+        index=True,
+    )
+
+    part_number = Column(
+        Integer,
+        nullable=False,
+    )
+
+    title = Column(
+        String(150),
+        nullable=False,
+    )
+
+    pdf_path = Column(
+        String(500),
+        nullable=True,
+    )
+
+    generation_status = Column(
+        String(20),
+        nullable=False,
+        default="Pending",
+        server_default=text("'Pending'"),
+    )
+
+    generated_at = Column(
+        DateTime,
+        nullable=True,
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+class TrainingQuestion(Base):
+    __tablename__ = "training_questions"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    part_id = Column(
+        Integer,
+        ForeignKey("training_parts.id"),
+        nullable=False,
+        index=True,
+    )
+
+    question = Column(
+        Text,
+        nullable=False,
+    )
+
+    option_a = Column(Text, nullable=False)
+    option_b = Column(Text, nullable=False)
+    option_c = Column(Text, nullable=False)
+    option_d = Column(Text, nullable=False)
+
+    correct_option = Column(
+        String(1),
+        nullable=False,
+    )
+
+    explanation = Column(
+        Text,
+        nullable=True,
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+class TrainingAttempt(Base):
+    __tablename__ = "training_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    part_id = Column(
+        Integer,
+        ForeignKey("training_parts.id"),
+        nullable=False,
+        index=True,
+    )
+
+    student_id = Column(
+        Integer,
+        ForeignKey("students.id"),
+        nullable=False,
+        index=True,
+    )
+
+    attempt_number = Column(
+        Integer,
+        nullable=False,
+    )
+
+    started_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    expires_at = Column(
+        DateTime,
+        nullable=False,
+    )
+
+    submitted_at = Column(
+        DateTime,
+        nullable=True,
+    )
+
+    score = Column(
+        Integer,
+        nullable=True,
+    )
+
+    status = Column(
+        String(20),
+        nullable=False,
+        default="In Progress",
+        server_default=text("'In Progress'"),
+    )
+
+class TrainingAttemptAnswer(Base):
+    __tablename__ = "training_attempt_answers"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "attempt_id",
+            "question_id",
+            name="uq_attempt_question_answer"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    attempt_id = Column(
+        Integer,
+        ForeignKey("training_attempts.id"),
+        nullable=False,
+        index=True,
+    )
+
+    question_id = Column(
+        Integer,
+        ForeignKey("training_questions.id"),
+        nullable=False,
+    )
+
+    selected_option = Column(
+        String(1),
+        nullable=False,
+    )
+
+    answered_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
