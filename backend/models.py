@@ -28,6 +28,12 @@ class Student(Base):
     skills = Column(String(1000), nullable=False)
     hashed_password = Column(String(255), nullable=False)
     profile_photo = Column(String(500), nullable=True)
+    is_placed = Column(
+    Boolean,
+    nullable=False,
+    default=False,
+    server_default=text("false")
+)
     
     status = Column(String(20),nullable=False,default="Pending",server_default=text("'Pending'"))
 
@@ -408,6 +414,13 @@ class AuditLog(Base):
 
 class EmployeeNotification(Base):
     __tablename__ = "employee_notifications"
+    __table_args__ = (
+        UniqueConstraint(
+            "employee_id",
+            "training_eligibility_id",
+            name="uq_employee_training_notification"
+        ),
+    )
 
     notification_id = Column(Integer, primary_key=True, index=True)
     employee_id = Column(
@@ -632,9 +645,9 @@ class TrainingEnrollment(Base):
     )
 
     completed_at = Column(
-        DateTime,
-        nullable=True,
-    )
+    DateTime(timezone=True),
+    nullable=True,
+)
 
 class TrainingResume(Base):
     __tablename__ = "training_resumes"

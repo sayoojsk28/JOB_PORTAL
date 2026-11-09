@@ -1,6 +1,6 @@
 
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status,BackgroundTasks
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -157,6 +157,107 @@ def get_student_rejection_count(
         )
 
     return query.scalar() or 0
+
+def create_training_eligibility_if_eligible(
+    db: Session,
+    student_id: int
+):
+    # 1. Get the student
+    student = db.query(models.Student).filter(
+        models.Student.id == student_id
+    ).first()
+
+    if not student:
+        return False
+
+    # 2. Placed students are not eligible
+    if student.is_placed:
+        return False
+
+    # 3. Check published rejected applications
+    rejection_count = get_student_rejection_count(
+        db,
+        student_id
+    )
+
+    if rejection_count < 3:
+        return False
+
+    # 4. Find the latest completed training cycle
+    latest_completed_cycle = (
+        db.query(models.TrainingEligibility.cycle_number)
+        .join(
+            models.TrainingEnrollment,
+            models.TrainingEnrollment.eligibility_id
+            == models.TrainingEligibility.id
+        )
+        .filter(
+            models.TrainingEnrollment.student_id == student_id,
+            models.TrainingEnrollment.completed_at.isnot(None)
+        )
+        .order_by(
+            models.TrainingEnrollment.completed_at.desc(),
+            models.TrainingEnrollment.id.desc()
+        )
+        .first()
+    )
+
+    cycle_number = (
+        latest_completed_cycle[0] + 1
+        if latest_completed_cycle
+        else 1
+    )
+
+    # 5. Create eligibility without allowing duplicates
+    eligibility_id = db.execute(
+        pg_insert(models.TrainingEligibility)
+        .values(
+            student_id=student_id,
+            rejected_application_count=rejection_count,
+            cycle_number=cycle_number,
+            status="Pending"
+        )
+        .on_conflict_do_nothing(
+            constraint="uq_training_eligibility_student_cycle"
+        )
+        .returning(models.TrainingEligibility.id)
+    ).scalar_one_or_none()
+
+    # Already exists for this cycle
+    if eligibility_id is None:
+        return False
+
+    # 6. Get all employees
+    employee_ids = [
+        employee_id
+        for (employee_id,) in db.query(
+            models.Employee.id
+        ).all()
+    ]
+
+    # 7. Create one notification per employee
+    if employee_ids:
+        db.execute(
+            pg_insert(models.EmployeeNotification)
+            .values([
+                {
+                    "employee_id": employee_id,
+                    "training_eligibility_id": eligibility_id,
+                    "message": (
+                        f"{student.full_name} has reached "
+                        f"{rejection_count} published rejected "
+                        f"applications and is eligible for training review."
+                    )
+                }
+                for employee_id in employee_ids
+            ])
+            .on_conflict_do_nothing(
+                constraint="uq_employee_training_notification"
+            )
+        )
+
+    return True
+
 Base.metadata.create_all(bind=engine)
 
 
@@ -1953,6 +2054,8 @@ def get_employee_interview_results(
 
     return results
 
+
+
 @app.patch("/employee/interview-results/{result_id}/publish")
 def publish_interview_result(
     result_id: int,
@@ -1969,28 +2072,75 @@ def publish_interview_result(
             detail="Interview result not found"
         )
 
-    interview_result.is_published = True
-    interview_result.published_on = datetime.now(timezone.utc)
+    was_already_published = interview_result.is_published
 
-    interview = db.query(models.Interview).filter(
-    models.Interview.interview_id == interview_result.interview_id
-).first()
+    if not was_already_published:
+        interview_result.is_published = True
+        interview_result.published_on = datetime.now(timezone.utc)
 
-    application = db.query(models.Application).filter(
-    models.Application.application_id == interview.application_id
-).first()
+        interview = db.query(models.Interview).filter(
+            models.Interview.interview_id == interview_result.interview_id
+        ).first()
 
-    notification = models.Notification(
-    student_id=application.student_id,
-    application_id=application.application_id,
-    message=(
-        f"Your interview result has been published. "
-        f"Result: {interview_result.result}. "
-        f"Please check your Interview Results page."
-    )
-)
+        if not interview:
+            raise HTTPException(
+                status_code=404,
+                detail="Interview not found"
+            )
 
-    db.add(notification)
+        application = db.query(models.Application).filter(
+            models.Application.application_id == interview.application_id
+        ).first()
+
+        if not application:
+            raise HTTPException(
+                status_code=404,
+                detail="Application not found"
+            )
+
+        # Create student notification
+        notification = models.Notification(
+            student_id=application.student_id,
+            application_id=application.application_id,
+            message=(
+                f"Your interview result has been published. "
+                f"Result: {interview_result.result}. "
+                f"Please check your Interview Results page."
+            )
+        )
+
+        db.add(notification)
+
+        if interview_result.result == "Rejected":
+
+            # IMPORTANT: Flush pending changes before counting rejections
+            db.flush()
+
+            student = db.query(models.Student).filter(
+                models.Student.id == application.student_id
+            ).first()
+
+            rejection_count = get_student_rejection_count(
+                db,
+                application.student_id
+            )
+
+            print("DEBUG STUDENT ID:", application.student_id)
+            print("DEBUG REJECTION COUNT:", rejection_count)
+            print(
+                "DEBUG PLACED STATUS:",
+                student.is_placed if student else "Student not found"
+            )
+
+            eligibility_created = create_training_eligibility_if_eligible(
+                db,
+                application.student_id
+            )
+
+            print(
+                "DEBUG ELIGIBILITY CREATED:",
+                eligibility_created
+            )
 
     db.commit()
     db.refresh(interview_result)
@@ -2001,6 +2151,7 @@ def publish_interview_result(
         "is_published": interview_result.is_published,
         "published_on": interview_result.published_on
     }
+
 
 @app.get(
     "/student/interview-results",
@@ -2600,6 +2751,200 @@ def send_employee_announcement(
         "students_notified": len(students)
     }
 
+@app.get("/employee/training-eligibilities")
+def get_training_eligibilities(
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    eligibilities = (
+        db.query(
+            models.TrainingEligibility,
+            models.Student
+        )
+        .join(
+            models.Student,
+            models.Student.id == models.TrainingEligibility.student_id
+        )
+        .order_by(
+            models.TrainingEligibility.created_at.desc()
+        )
+        .all()
+    )
+
+    return [
+        {
+            "eligibility_id": eligibility.id,
+            "student_id": student.id,
+            "student_name": student.full_name,
+            "student_email": student.email,
+            "rejected_application_count": eligibility.rejected_application_count,
+            "cycle_number": eligibility.cycle_number,
+            "status": eligibility.status,
+            "claimed_by": eligibility.claimed_by,
+            "claimed_at": eligibility.claimed_at,
+            "reviewed_by": eligibility.reviewed_by,
+            "reviewed_at": eligibility.reviewed_at,
+            "created_at": eligibility.created_at,
+        }
+        for eligibility, student in eligibilities
+    ]
+@app.patch("/employee/training-eligibilities/{eligibility_id}/claim")
+def claim_training_eligibility(
+    eligibility_id: int,
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    eligibility = db.query(models.TrainingEligibility).filter(
+        models.TrainingEligibility.id == eligibility_id
+    ).first()
+
+    if not eligibility:
+        raise HTTPException(
+            status_code=404,
+            detail="Training eligibility not found"
+        )
+
+    if eligibility.status != "Pending":
+        raise HTTPException(
+            status_code=409,
+            detail="This eligibility is no longer pending"
+        )
+
+    if eligibility.claimed_by == employee.id:
+        return {
+            "message": "You have already claimed this eligibility",
+            "eligibility_id": eligibility_id,
+            "claimed_by": employee.id,
+        }
+
+    if eligibility.claimed_by is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This eligibility has already been claimed by another employee"
+        )
+
+    # Atomically claim only if it is still unclaimed
+    updated_count = (
+        db.query(models.TrainingEligibility)
+        .filter(
+            models.TrainingEligibility.id == eligibility_id,
+            models.TrainingEligibility.claimed_by.is_(None),
+            models.TrainingEligibility.status == "Pending"
+        )
+        .update(
+            {
+                models.TrainingEligibility.claimed_by: employee.id,
+                models.TrainingEligibility.claimed_at: datetime.now(timezone.utc),
+            },
+            synchronize_session=False
+        )
+    )
+
+    if updated_count == 0:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=409,
+            detail="This eligibility has already been claimed"
+        )
+
+    # Mark only this employee's matching notification as read
+    db.query(models.EmployeeNotification).filter(
+        models.EmployeeNotification.employee_id == employee.id,
+        models.EmployeeNotification.training_eligibility_id == eligibility_id
+    ).update(
+        {
+            models.EmployeeNotification.is_read: True
+        },
+        synchronize_session=False
+    )
+
+    db.commit()
+
+    return {
+        "message": "Training eligibility claimed successfully",
+        "eligibility_id": eligibility_id,
+        "claimed_by": employee.id,
+    }
+
+@app.patch("/employee/training-eligibilities/{eligibility_id}/approve")
+def approve_training_eligibility(
+    eligibility_id: int,
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    eligibility = db.query(models.TrainingEligibility).filter(
+        models.TrainingEligibility.id == eligibility_id
+    ).first()
+
+    if not eligibility:
+        raise HTTPException(status_code=404, detail="Training eligibility not found")
+
+    if eligibility.claimed_by != employee.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the employee who claimed this eligibility can approve it"
+        )
+
+    if eligibility.status != "Pending":
+        raise HTTPException(
+            status_code=409,
+            detail="This eligibility has already been reviewed"
+        )
+
+    eligibility.status = "Approved"
+    eligibility.reviewed_by = employee.id
+    eligibility.reviewed_at = datetime.now()
+
+    db.commit()
+    db.refresh(eligibility)
+
+    return {
+        "message": "Training eligibility approved successfully",
+        "eligibility_id": eligibility.id,
+        "status": eligibility.status,
+        "reviewed_by": eligibility.reviewed_by,
+    }
+
+@app.patch("/employee/training-eligibilities/{eligibility_id}/reject")
+def reject_training_eligibility(
+    eligibility_id: int,
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    eligibility = db.query(models.TrainingEligibility).filter(
+        models.TrainingEligibility.id == eligibility_id
+    ).first()
+
+    if not eligibility:
+        raise HTTPException(status_code=404, detail="Training eligibility not found")
+
+    if eligibility.claimed_by != employee.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the employee who claimed this eligibility can reject it"
+        )
+
+    if eligibility.status != "Pending":
+        raise HTTPException(
+            status_code=409,
+            detail="This eligibility has already been reviewed"
+        )
+
+    eligibility.status = "Rejected"
+    eligibility.reviewed_by = employee.id
+    eligibility.reviewed_at = datetime.now()
+
+    db.commit()
+    db.refresh(eligibility)
+
+    return {
+        "message": "Training eligibility rejected successfully",
+        "eligibility_id": eligibility.id,
+        "status": eligibility.status,
+        "reviewed_by": eligibility.reviewed_by,
+    }
+
 @app.get("/employee/students/active")
 def get_active_students(
     db: Session = Depends(get_db),
@@ -2722,6 +3067,7 @@ def get_my_student_profile(
         "id": current_user.id,
         "full_name": current_user.full_name,
         "profile_photo": current_user.profile_photo,
+        "is_placed": current_user.is_placed,
     }
 
 
@@ -2883,3 +3229,27 @@ def delete_student_feedback(
         "message": "Feedback deleted successfully"
     }
 
+@app.patch("/student/my-profile/placed")
+def update_my_placed_status(
+    is_placed: bool,
+    current_user=Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    was_placed = current_user.is_placed
+
+    current_user.is_placed = is_placed
+
+    # Check eligibility only when Placed changes from ON to OFF
+    if was_placed and not is_placed:
+        create_training_eligibility_if_eligible(
+            db,
+            current_user.id
+        )
+
+    db.commit()
+    db.refresh(current_user)
+
+    return {
+        "message": "Placed status updated successfully",
+        "is_placed": current_user.is_placed,
+    }

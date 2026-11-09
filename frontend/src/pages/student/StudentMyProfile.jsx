@@ -17,6 +17,8 @@ export default function StudentMyProfile() {
   const [activeSection, setActiveSection] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [savingPlaced, setSavingPlaced] = useState(false);
+  const [placedError, setPlacedError] = useState('');
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -34,7 +36,37 @@ export default function StudentMyProfile() {
 
     fetchProfile();
   }, []);
+const handlePlacedToggle = async () => {
+  if (savingPlaced || !student) return;
 
+  const newStatus = !student.is_placed;
+
+  setSavingPlaced(true);
+  setPlacedError('');
+
+  try {
+    const response = await api.patch(
+      '/student/my-profile/placed',
+      null,
+      {
+        params: {
+          is_placed: newStatus,
+        },
+      }
+    );
+
+    setStudent((prev) => ({
+      ...prev,
+      is_placed: response.data.is_placed,
+    }));
+  } catch (err) {
+    setPlacedError(
+      err.response?.data?.detail || 'Unable to update Placed status.'
+    );
+  } finally {
+    setSavingPlaced(false);
+  }
+};
   const photoUrl = student?.profile_photo
     ? `http://127.0.0.1:8000/${student.profile_photo.replace(/^\/+/, '')}`
     : null;
@@ -102,6 +134,59 @@ export default function StudentMyProfile() {
             </div>
           </div>
         </section>
+        
+{/* Placed Status */}
+<section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+  <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+
+    <div>
+      <h2 className="text-lg font-bold text-slate-800">
+        Placement Status
+      </h2>
+
+      <p className="mt-1 text-sm text-slate-500">
+        Update your placement status if you have been placed.
+      </p>
+
+      <div className="mt-3 flex items-center gap-2">
+        <span
+          className={`h-2.5 w-2.5 rounded-full ${
+            student.is_placed ? 'bg-green-500' : 'bg-slate-400'
+          }`}
+        />
+
+        <span className="text-sm font-semibold text-slate-700">
+          {student.is_placed ? 'Placed' : 'Not Placed'}
+        </span>
+      </div>
+    </div>
+
+    <button
+      type="button"
+      onClick={handlePlacedToggle}
+      disabled={savingPlaced}
+      className={`rounded-xl px-6 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 ${
+        student.is_placed
+          ? 'bg-slate-600 hover:bg-slate-700'
+          : 'bg-blue-600 hover:bg-blue-700'
+      }`}
+    >
+      {savingPlaced
+        ? 'Updating...'
+        : student.is_placed
+          ? 'Mark as Not Placed'
+          : 'Mark as Placed'}
+    </button>
+
+  </div>
+
+  {placedError && (
+    <p className="mt-4 text-sm font-medium text-red-600">
+      {placedError}
+    </p>
+  )}
+</section>
+
 
         {/* Selectable sections */}
         <section className="mt-8">

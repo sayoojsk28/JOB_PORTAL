@@ -34,6 +34,12 @@ const dashboardCards = [
   path: '/employee/students',
 },
 {
+  title: 'View Training Eligible Students',
+  description: 'Review eligible students and manage their training approval and progress.',
+  icon: '📚',
+  path: '/employee/training-eligibilities',
+},
+{
   title: 'Student Status History',
   description: 'View approved and rejected students and manage their account status.',
   icon: '📊',
