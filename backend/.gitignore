@@ -27,3 +27,6 @@ frontend/.vite/
 # Python environment files
 .env.*
 !.env.example
+
+# Generated training PDFs
+training_documents/

@@ -36,7 +36,8 @@ from schemas import (
     StudentInterviewResultResponse,
     AnnouncementCreate,
     StudentFeedbackCreate,
-    EmployeeAnnouncementCreate
+    EmployeeAnnouncementCreate,
+    TrainingCourseCreate,
 )
 import os
 import uuid
@@ -51,6 +52,7 @@ from pathlib import Path
 from datetime import date
 import jwt
 from fastapi import Query
+from training_generator import generate_part_one
 os.makedirs("uploads/employee_photos", exist_ok=True)
 
 
@@ -59,6 +61,8 @@ app = FastAPI(title="Job Portal API")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
+TRAINING_DOCUMENTS_DIR = os.path.join(BASE_DIR, "training_documents")
+os.makedirs(TRAINING_DOCUMENTS_DIR, exist_ok=True)
 COMPANY_LOGOS_DIR = os.path.join(UPLOADS_DIR, "company_logos")
 os.makedirs(COMPANY_LOGOS_DIR, exist_ok=True)
 
@@ -2751,6 +2755,7 @@ def send_employee_announcement(
         "students_notified": len(students)
     }
 
+
 @app.get("/employee/training-eligibilities")
 def get_training_eligibilities(
     db: Session = Depends(get_db),
@@ -2759,11 +2764,20 @@ def get_training_eligibilities(
     eligibilities = (
         db.query(
             models.TrainingEligibility,
-            models.Student
+            models.Student,
+            models.TrainingCourse,
         )
         .join(
             models.Student,
             models.Student.id == models.TrainingEligibility.student_id
+        )
+        .outerjoin(
+            models.TrainingEnrollment,
+            models.TrainingEnrollment.eligibility_id == models.TrainingEligibility.id
+        )
+        .outerjoin(
+            models.TrainingCourse,
+            models.TrainingCourse.id == models.TrainingEnrollment.course_id
         )
         .order_by(
             models.TrainingEligibility.created_at.desc()
@@ -2785,9 +2799,22 @@ def get_training_eligibilities(
             "reviewed_by": eligibility.reviewed_by,
             "reviewed_at": eligibility.reviewed_at,
             "created_at": eligibility.created_at,
+
+            "course_id": course.id if course else None,
+            "course_created_by": course.created_by if course else None,
+            "can_add_course_details": (
+                eligibility.status == "Approved"
+                and eligibility.claimed_by == employee.id
+                and course is None
+            ),
+            "can_view_progress": (
+                course is not None
+                and course.created_by == employee.id
+            ),
         }
-        for eligibility, student in eligibilities
+        for eligibility, student, course in eligibilities
     ]
+
 @app.patch("/employee/training-eligibilities/{eligibility_id}/claim")
 def claim_training_eligibility(
     eligibility_id: int,
@@ -2904,6 +2931,103 @@ def approve_training_eligibility(
         "eligibility_id": eligibility.id,
         "status": eligibility.status,
         "reviewed_by": eligibility.reviewed_by,
+    }
+@app.post("/employee/training-eligibilities/{eligibility_id}/course")
+def create_training_course(
+    eligibility_id: int,
+    course_data: TrainingCourseCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    eligibility = db.query(models.TrainingEligibility).filter(
+        models.TrainingEligibility.id == eligibility_id
+    ).first()
+
+    if not eligibility:
+        raise HTTPException(
+            status_code=404,
+            detail="Training eligibility not found"
+        )
+
+    if eligibility.claimed_by != employee.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the claiming employee can create this course"
+        )
+
+    if eligibility.status != "Approved":
+        raise HTTPException(
+            status_code=409,
+            detail="Training eligibility must be approved first"
+        )
+
+    existing_enrollment = db.query(models.TrainingEnrollment).filter(
+        models.TrainingEnrollment.eligibility_id == eligibility_id
+    ).first()
+
+    if existing_enrollment:
+        raise HTTPException(
+            status_code=409,
+            detail="Training course already created for this eligibility"
+        )
+
+    try:
+        # Create course
+        course = models.TrainingCourse(
+            course_type=course_data.course_type,
+            job_role=course_data.job_role.strip(),
+            created_by=employee.id,
+        )
+
+        db.add(course)
+        db.flush()
+
+        # Create student enrollment
+        enrollment = models.TrainingEnrollment(
+            eligibility_id=eligibility.id,
+            student_id=eligibility.student_id,
+            course_id=course.id,
+        )
+
+        db.add(enrollment)
+        db.flush()
+
+        # Create only Part 1 initially
+        part = models.TrainingPart(
+            enrollment_id=enrollment.id,
+            part_number=1,
+            title="Job Role Knowledge",
+            generation_status="Pending",
+        )
+
+        db.add(part)
+        db.flush()
+
+        course_id = course.id
+        enrollment_id = enrollment.id
+        part_id = part.id
+
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        raise
+
+    # Start AI generation after successful database commit
+    background_tasks.add_task(
+        generate_part_one,
+        part_id,
+        course_data.job_role.strip()
+    )
+
+    return {
+        "message": "Training course created. Part 1 generation started.",
+        "eligibility_id": eligibility_id,
+        "course_id": course_id,
+        "enrollment_id": enrollment_id,
+        "part_id": part_id,
+        "generation_status": "Pending",
     }
 
 @app.patch("/employee/training-eligibilities/{eligibility_id}/reject")

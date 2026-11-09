@@ -54,6 +54,8 @@ import ViewAnnouncements from '../pages/student/ViewAnnouncements';
 import AppliedJobsHistory from '../pages/student/AppliedJobsHistory';
 import StudentChangePassword from '../pages/student/StudentChangePassword';
 import AdminStudentProfile from '../pages/Dashboard/AdminStudentProfile';
+import CourseConfiguration from '../pages/employee/CourseConfiguration';
+import TrainingEligibleStudents from '../pages/employee/TrainingEligibleStudents';
 
 const AppRoutes = () => {
   return (
@@ -219,6 +221,10 @@ const AppRoutes = () => {
             path="/employee/pending-students"
             element={<PendingStudents />}
           />
+          <Route
+  path="/employee/training-eligibilities/:eligibilityId/course"
+  element={<CourseConfiguration />}
+/>
 
           <Route
             path="/employee/change-password"
@@ -235,11 +241,16 @@ const AppRoutes = () => {
             element={<EmployeeSendAnnouncements />}
           />
 
+          <Route
+  path="/employee/training-eligibilities"
+  element={<TrainingEligibleStudents />}
+/>
+
         </Route>
 
 
         {/* Employee Routes */}
-
+      <Route element={<ProtectedRoute allowedRoles={['employee']} />}>
         <Route
           path="/employee/companies/create"
           element={<PostCompanies />}
@@ -309,6 +320,7 @@ const AppRoutes = () => {
           path="/employee/students/:studentId"
           element={<StudentProfile />}
         />
+        </Route>
 
       </Routes>
     </>
