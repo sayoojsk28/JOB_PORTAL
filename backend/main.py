@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from pwdlib import PasswordHash
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 import re
+import json
 
 
 from database import engine, Base, SessionLocal
@@ -38,6 +39,7 @@ from schemas import (
     StudentFeedbackCreate,
     EmployeeAnnouncementCreate,
     TrainingCourseCreate,
+    InterviewAnalysisCreate,
 )
 import os
 import uuid
@@ -48,10 +50,28 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 from fastapi.staticfiles import StaticFiles
 from fastapi import Body
+from fastapi.responses import FileResponse
 from pathlib import Path
 from datetime import date
 import jwt
+import fitz
+import ollama
 from fastapi import Query
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    PageBreak,
+)
+from reportlab.lib.styles import (
+    getSampleStyleSheet,
+    ParagraphStyle,
+)
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from xml.sax.saxutils import escape
 from training_generator import generate_part_one
 os.makedirs("uploads/employee_photos", exist_ok=True)
 
@@ -63,6 +83,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
 TRAINING_DOCUMENTS_DIR = os.path.join(BASE_DIR, "training_documents")
 os.makedirs(TRAINING_DOCUMENTS_DIR, exist_ok=True)
+INTERVIEW_ANALYSIS_DIR = os.path.join(
+    TRAINING_DOCUMENTS_DIR,
+    "interview_analysis_reports"
+)
+
+os.makedirs(INTERVIEW_ANALYSIS_DIR, exist_ok=True)
 COMPANY_LOGOS_DIR = os.path.join(UPLOADS_DIR, "company_logos")
 os.makedirs(COMPANY_LOGOS_DIR, exist_ok=True)
 
@@ -112,24 +138,14 @@ def log_action(
     )
 
     db.add(audit_log)
+
 def get_student_rejection_count(
     db: Session,
     student_id: int
 ) -> int:
 
-    # Find the latest completed training cycle
-    last_completed_at = (
-        db.query(
-            func.max(models.TrainingEnrollment.completed_at)
-        )
-        .filter(
-            models.TrainingEnrollment.student_id == student_id,
-            models.TrainingEnrollment.completed_at.isnot(None)
-        )
-        .scalar()
-    )
+    cutoff_at = get_student_training_cutoff(db, student_id)
 
-    # Count distinct rejected applications
     query = (
         db.query(
             func.count(
@@ -153,14 +169,90 @@ def get_student_rejection_count(
         )
     )
 
-    # For subsequent cycles, count only applications
-    # submitted after the previous training completion
-    if last_completed_at is not None:
+    if cutoff_at is not None:
         query = query.filter(
-            models.Application.applied_at > last_completed_at
+            models.Application.applied_at > cutoff_at
         )
 
     return query.scalar() or 0
+
+
+
+
+def get_student_rejected_applications(
+    db: Session,
+    student_id: int
+):
+    cutoff_at = get_student_training_cutoff(db, student_id)
+
+    query = (
+        db.query(
+            models.Application.application_id,
+            func.min(
+                models.InterviewResult.published_on
+            ).label("published_at")
+        )
+        .join(
+            models.Interview,
+            models.Interview.application_id
+            == models.Application.application_id
+        )
+        .join(
+            models.InterviewResult,
+            models.InterviewResult.interview_id
+            == models.Interview.interview_id
+        )
+        .filter(
+            models.Application.student_id == student_id,
+            models.InterviewResult.result == "Rejected",
+            models.InterviewResult.is_published.is_(True)
+        )
+        .group_by(
+            models.Application.application_id
+        )
+    )
+
+    if cutoff_at is not None:
+        query = query.filter(
+            models.Application.applied_at > cutoff_at
+        )
+
+    rejected_applications = (
+        query
+        .order_by(
+            func.min(
+                models.InterviewResult.published_on
+            ).asc(),
+            models.Application.application_id.asc()
+        )
+        .limit(3)
+        .all()
+    )
+
+    application_ids = [
+        application_id
+        for application_id, published_at in rejected_applications
+    ]
+
+    if not application_ids:
+        return []
+
+    applications = db.query(models.Application).filter(
+        models.Application.application_id.in_(application_ids)
+    ).all()
+
+    application_map = {
+        application.application_id: application
+        for application in applications
+    }
+
+    return [
+        application_map[application_id]
+        for application_id in application_ids
+        if application_id in application_map
+    ]
+
+
 
 def create_training_eligibility_if_eligible(
     db: Session,
@@ -178,46 +270,59 @@ def create_training_eligibility_if_eligible(
     if student.is_placed:
         return False
 
-    # 3. Check published rejected applications
-    rejection_count = get_student_rejection_count(
+    # 3. Get exactly 3 rejected applications from the current cycle
+    rejected_applications = get_student_rejected_applications(
         db,
         student_id
     )
 
-    if rejection_count < 3:
+    if len(rejected_applications) < 3:
         return False
 
-    # 4. Find the latest completed training cycle
-    latest_completed_cycle = (
-        db.query(models.TrainingEligibility.cycle_number)
-        .join(
-            models.TrainingEnrollment,
-            models.TrainingEnrollment.eligibility_id
-            == models.TrainingEligibility.id
-        )
-        .filter(
-            models.TrainingEnrollment.student_id == student_id,
-            models.TrainingEnrollment.completed_at.isnot(None)
-        )
-        .order_by(
-            models.TrainingEnrollment.completed_at.desc(),
-            models.TrainingEnrollment.id.desc()
-        )
-        .first()
-    )
+    application_ids = [
+        application.application_id
+        for application in rejected_applications
+    ]
 
-    cycle_number = (
-        latest_completed_cycle[0] + 1
-        if latest_completed_cycle
-        else 1
+    # 4. Find the latest completed training cycle
+    latest_cycle_number = (
+    db.query(
+        func.max(models.TrainingEligibility.cycle_number)
     )
+    .filter(
+        models.TrainingEligibility.student_id == student_id
+    )
+    .scalar()
+)
+
+    cycle_number = (latest_cycle_number or 0) + 1
+
+    active_eligibility = (
+    db.query(models.TrainingEligibility)
+    .filter(
+        models.TrainingEligibility.student_id == student_id,
+        models.TrainingEligibility.status.in_(["Pending", "Approved"])
+    )
+    .first()
+)
+
+    if active_eligibility:
+        active_enrollment = db.query(
+        models.TrainingEnrollment
+    ).filter(
+        models.TrainingEnrollment.eligibility_id == active_eligibility.id,
+        models.TrainingEnrollment.completed_at.is_(None)
+    ).first()
+
+        if active_enrollment:
+            return False
 
     # 5. Create eligibility without allowing duplicates
     eligibility_id = db.execute(
         pg_insert(models.TrainingEligibility)
         .values(
             student_id=student_id,
-            rejected_application_count=rejection_count,
+            rejected_application_count=3,
             cycle_number=cycle_number,
             status="Pending"
         )
@@ -231,7 +336,22 @@ def create_training_eligibility_if_eligible(
     if eligibility_id is None:
         return False
 
-    # 6. Get all employees
+    # 6. Save the exact 3 applications for this eligibility
+    db.execute(
+        pg_insert(models.TrainingEligibilityApplication)
+        .values([
+            {
+                "eligibility_id": eligibility_id,
+                "application_id": application_id
+            }
+            for application_id in application_ids
+        ])
+        .on_conflict_do_nothing(
+            constraint="uq_training_eligibility_application"
+        )
+    )
+
+    # 7. Get all employees
     employee_ids = [
         employee_id
         for (employee_id,) in db.query(
@@ -239,7 +359,7 @@ def create_training_eligibility_if_eligible(
         ).all()
     ]
 
-    # 7. Create one notification per employee
+    # 8. Create one notification per employee
     if employee_ids:
         db.execute(
             pg_insert(models.EmployeeNotification)
@@ -249,8 +369,8 @@ def create_training_eligibility_if_eligible(
                     "training_eligibility_id": eligibility_id,
                     "message": (
                         f"{student.full_name} has reached "
-                        f"{rejection_count} published rejected "
-                        f"applications and is eligible for training review."
+                        f"3 published rejected applications "
+                        f"and is eligible for training review."
                     )
                 }
                 for employee_id in employee_ids
@@ -261,6 +381,39 @@ def create_training_eligibility_if_eligible(
         )
 
     return True
+
+def get_student_training_cutoff(
+    db: Session,
+    student_id: int
+):
+    student = db.query(models.Student).filter(
+        models.Student.id == student_id
+    ).first()
+
+    last_completed_at = (
+        db.query(
+            func.max(models.TrainingEnrollment.completed_at)
+        )
+        .filter(
+            models.TrainingEnrollment.student_id == student_id,
+            models.TrainingEnrollment.completed_at.isnot(None)
+        )
+        .scalar()
+    )
+
+    baseline_at = (
+        student.training_rejection_baseline_at
+        if student else None
+    )
+
+    dates = [
+        date_value
+        for date_value in [last_completed_at, baseline_at]
+        if date_value is not None
+    ]
+
+    return max(dates) if dates else None
+
 
 Base.metadata.create_all(bind=engine)
 
@@ -488,8 +641,1393 @@ def create_default_admin():
     finally:
         db.close()
 
+def extract_resume_text(file_path: str) -> str:
+    try:
+        with fitz.open(file_path) as document:
+            text = ""
+
+            for page in document:
+                text += page.get_text()
+
+        if not text.strip():
+            raise ValueError("Resume contains no readable text")
+
+        return text
+
+    except Exception as e:
+        raise ValueError(f"Failed to extract resume text: {str(e)}")
+
+def extract_resume_skills(resume_text: str) -> list:
+
+    prompt = f"""
+You are an expert technical recruiter.
+
+Extract technical skills explicitly mentioned in this resume.
+
+Rules:
+1. Include programming languages, frameworks, libraries,
+   databases, tools and technologies.
+2. Do not invent skills.
+3. Avoid duplicate skills.
+4. Return ONLY a JSON object in this exact format:
+
+{{
+    "skills": [
+        "Python",
+        "React",
+        "PostgreSQL"
+    ]
+}}
+
+Resume:
+{resume_text}
+"""
+
+    response = ollama.chat(
+        model="llama3.2:latest",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        format="json",
+        options={
+            "temperature": 0.1
+        }
+    )
+
+    result = json.loads(
+        response["message"]["content"].strip()
+    )
+
+    if not isinstance(result, dict):
+        raise ValueError("AI returned invalid skills format")
+
+    skills = result.get("skills")
+
+    if not isinstance(skills, list):
+        raise ValueError("AI skills array is missing")
+
+    skills = [
+        skill.strip()
+        for skill in skills
+        if isinstance(skill, str) and skill.strip()
+    ]
+
+    return list(dict.fromkeys(skills))
 
 
+def classify_training_course_type(
+    job_role: str,
+    resume_texts: list[str]
+) -> str:
+
+    combined_resumes = "\n\n".join(
+        f"Resume {index + 1}:\n{text}"
+        for index, text in enumerate(resume_texts)
+        if text and text.strip()
+    )
+
+    prompt = f"""
+You are an expert technical career analyst.
+
+Your task is to classify a training course based on
+the job role and the candidate resumes.
+
+Job Role:
+{job_role}
+
+Candidate Resumes:
+{combined_resumes}
+
+Classification rules:
+
+1. Coding:
+   Select Coding if the job role primarily involves
+   software development, programming, application development,
+   web development, backend, frontend, full-stack,
+   mobile development, or writing code.
+
+2. Non-Coding:
+   Select Non-Coding if the job role primarily involves
+   non-programming responsibilities such as HR, recruitment,
+   sales, marketing, business administration, customer support,
+   accounting, or management.
+
+3. Consider both the job role and resume information.
+4. The actual job responsibilities are more important
+   than simply finding programming skills in a resume.
+5. Do not assume a role is Coding just because the resume
+   mentions Python, Java, or other programming skills.
+6. Choose exactly one category.
+
+Return ONLY a JSON object in this format:
+
+{{
+    "course_type": "Coding"
+}}
+
+The course_type must be exactly "Coding" or "Non-Coding".
+"""
+
+    response = ollama.chat(
+        model="llama3.2:latest",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        format="json",
+        options={
+            "temperature": 0.0
+        }
+    )
+
+    result = json.loads(
+        response["message"]["content"].strip()
+    )
+
+    if not isinstance(result, dict):
+        raise ValueError("AI returned invalid classification format")
+
+    course_type = result.get("course_type")
+
+    if course_type not in ["Coding", "Non-Coding"]:
+        raise ValueError("AI returned an invalid course type")
+
+    return course_type
+
+
+
+
+
+def analyze_interview_with_ai(
+    job_role: str,
+    course_type: str,
+    resume_skills: list,
+    interview_explanation: str
+) -> dict:
+
+    import json
+    import re
+    import ollama
+
+    MODEL = "qwen3:8b "
+
+    
+    
+    SYSTEM_PROMPT = """
+# GOAL
+
+You are an experienced technical career mentor specializing in
+interview performance analysis and professional development.
+
+Your task is to conduct a deep, evidence-based analysis of a
+candidate's interview experiences.
+
+Do not simply summarize what happened or produce a conventional
+interview weakness report.
+
+Understand the candidate's experiences as a connected history.
+Identify recurring patterns, meaningful changes between interviews,
+possible underlying factors, overlooked insights, and specific areas
+that could improve the candidate's future interview performance.
+
+The objective is to help the candidate understand their interview
+performance more clearly than they currently understand it themselves.
+
+Your analysis must be thoughtful, realistic, specific, and honest.
+
+# CONTEXT
+
+The candidate may have attended multiple interviews and may describe
+them using incomplete memories, rough explanations, personal
+impressions, or general observations.
+
+They are not expected to remember exact interview questions,
+technical answers, or interviewer reactions.
+
+Treat the provided explanation as the only source of factual evidence.
+
+Understand that interview performance can involve several distinct
+abilities:
+
+- Understanding technical concepts.
+- Applying knowledge in practical situations.
+- Explaining how and why an implementation works.
+- Justifying technical decisions.
+- Responding to follow-up questions.
+- Adapting knowledge to unfamiliar scenarios.
+- Communicating thoughts clearly under interview conditions.
+- Connecting theoretical knowledge with practical experience.
+
+These abilities are related but are not interchangeable.
+
+For example, successfully building an application does not
+automatically establish deep understanding of every technology used.
+Similarly, difficulty explaining something during an interview does
+not automatically prove that the candidate lacks practical ability.
+
+Do not assume that every rejection has the same underlying cause.
+
+Actual rejection reasons are unknown unless the candidate explicitly
+reports receiving feedback from the interviewer or company.
+
+# ACTION
+
+## 1. Understand the complete interview history
+
+Examine all interviews together before forming conclusions.
+
+Understand:
+- What happened in each interview.
+- What the candidate found difficult.
+- What appeared to improve between interviews.
+- Which difficulties continued despite preparation.
+- Whether different interviews reveal a connected pattern.
+
+Do not treat each interview as an isolated incident.
+
+## 2. Identify meaningful recurring patterns
+
+Look for patterns that appear across multiple experiences.
+
+Distinguish between:
+- A difficulty that happened only once.
+- A difficulty that appeared repeatedly.
+- A difficulty that changed over time.
+- A possible weakness that becomes visible only when
+  different experiences are considered together.
+
+Do not manufacture patterns merely to fill the report.
+
+## 3. Analyze progression and changes
+
+Compare the candidate's earlier and later interviews.
+
+Consider:
+- Whether preparation changed performance.
+- Whether nervousness remained a relevant factor.
+- Whether improving one area exposed another difficulty.
+- Whether the candidate became more comfortable but continued
+  experiencing similar technical or reasoning difficulties.
+- Whether the nature of the difficulties changed.
+
+Acknowledge genuine improvement when the evidence supports it.
+
+Do not describe the candidate as making no progress simply because
+they were not selected.
+
+## 4. Investigate possible underlying reasons
+
+Explore plausible explanations behind the identified patterns.
+
+Consider multiple possibilities when appropriate, such as:
+- Gaps in conceptual understanding.
+- Limited experience explaining technical decisions.
+- Difficulty connecting implementation with underlying principles.
+- Limited practice with unfamiliar problem scenarios.
+- Difficulty organizing thoughts while speaking.
+- Interview-specific communication pressure.
+- Preparation focused on recalling information rather than
+  understanding and applying it.
+
+These are possible explanations, not established facts.
+
+For every proposed reason:
+- Explain what observation supports it.
+- Distinguish direct evidence from interpretation.
+- Consider alternative explanations when relevant.
+- Avoid presenting speculation as certainty.
+
+Do not automatically agree with the candidate's own explanation.
+Examine whether their interpretation is supported by their experiences.
+
+## 5. Discover overlooked insights
+
+Identify meaningful observations that the candidate may not have
+recognized independently.
+
+Look beyond obvious weaknesses.
+
+For example, investigate whether:
+- The candidate performs better when building something than
+  when explaining the same work.
+- Familiar topics become difficult when follow-up questions
+  require deeper reasoning.
+- Preparation improves confidence without necessarily improving
+  the ability to apply knowledge.
+- The candidate can describe what an application does but
+  struggles to justify why it was designed that way.
+
+These are examples of analytical directions, not conclusions
+to force into every report.
+
+Every insight must be relevant to the actual input.
+
+## 6. Establish improvement priorities
+
+Select the most important areas that deserve attention.
+
+Do not generate a long list of generic interview tips.
+
+For each priority:
+- Identify the specific difficulty.
+- Explain why addressing it matters.
+- Recommend a practical action.
+- Provide a concrete exercise that the candidate can perform.
+
+Exercises should directly target the identified difficulty.
+
+Prefer meaningful practice over generic advice such as
+"study more", "be confident", or "improve communication".
+
+Prioritize the most important improvements rather than treating
+every possible weakness as equally important.
+
+## 7. Develop a next-interview strategy
+
+Create a practical strategy based on the complete analysis.
+
+The strategy should help the candidate approach future interviews
+differently.
+
+Include relevant preparation methods, ways to handle follow-up
+questions, approaches to explaining projects, or methods for
+reasoning through unfamiliar situations.
+
+Avoid repeating the improvement priorities word for word.
+
+The strategy should translate the analysis into practical
+interview behavior.
+
+# EVIDENCE AND REASONING RULES
+
+These rules are mandatory throughout the analysis.
+
+1. Never invent interview questions, answers, technical details,
+   interviewer reactions, feedback, or events.
+
+2. Never introduce technologies, tools, frameworks, or project
+   details that the candidate did not mention.
+
+3. Do not assume that a company rejected the candidate for a
+   particular reason.
+
+4. Do not confuse a possible explanation with an established fact.
+
+5. Clearly distinguish:
+   - Directly reported observations.
+   - Reasonable interpretations.
+   - Speculative possibilities.
+
+6. Use confidence levels carefully:
+   - high: directly and repeatedly supported by the input.
+   - medium: supported by meaningful evidence but not conclusive.
+   - low: plausible interpretation with limited supporting evidence.
+
+7. Do not assign high confidence to an explanation merely because
+   it sounds reasonable.
+
+8. Do not infer poor technical knowledge solely from the fact that
+   the candidate used documentation, tutorials, or examples.
+
+9. Do not assume nervousness explains every communication or
+   performance difficulty.
+
+10. Do not diagnose psychological, cognitive, or personality
+    conditions.
+
+11. Avoid repeating the same observation under different headings
+    without adding meaningful new analysis.
+
+12. Do not force every section to contain multiple items.
+    Include only findings that are genuinely supported.
+
+13. When the input is insufficient to establish a conclusion,
+    acknowledge the uncertainty rather than filling the gap.
+
+14. Depth must be proportional to the quality and detail of the
+    candidate's input.
+
+15. Do not praise or criticize the candidate without a reason
+    grounded in the provided experiences.
+
+# OUTPUT FORMAT
+
+Return one valid JSON object using exactly the following structure:
+
+{
+  "overall_assessment": "A comprehensive assessment of the
+  candidate's overall interview history, including the most
+  important recurring themes and meaningful progression.",
+
+  "main_patterns": [
+    {
+      "pattern": "Name of the identified pattern.",
+      "observation": "Specific observations from the candidate's
+      interview experiences supporting this pattern.",
+      "why_it_matters": "Explain the significance of this pattern
+      for interview performance.",
+      "confidence": "high/medium/low"
+    }
+  ],
+
+  "possible_underlying_reasons": [
+    {
+      "reason": "A plausible underlying factor.",
+      "explanation": "Explain how this factor could contribute
+      to the observed difficulty.",
+      "supporting_observation": "The specific candidate-reported
+      observation supporting this possibility.",
+      "confidence": "high/medium/low"
+    }
+  ],
+
+  "unnoticed_insights": [
+    {
+      "insight": "A meaningful observation the candidate may
+      have overlooked.",
+      "explanation": "Explain the reasoning behind this insight
+      using the candidate's experiences.",
+      "practical_tip": "A specific way to use this insight
+      to improve."
+    }
+  ],
+
+  "improvement_priorities": [
+    {
+      "priority": "The specific area that deserves attention.",
+      "action": "A practical action to address it.",
+      "practice": "A concrete exercise the candidate can perform."
+    }
+  ],
+
+  "next_interview_strategy": [
+    "A specific and actionable recommendation for future interviews."
+  ]
+}
+
+# JSON REQUIREMENTS
+
+- Return only valid JSON.
+- Do not include Markdown code fences.
+- Do not add introductory or concluding text outside JSON.
+- Use exactly the specified top-level keys.
+- Every collection must be a JSON array.
+- Every object must contain all specified fields.
+- All values must use the correct string or array types.
+- Confidence must be exactly one of: high, medium, low.
+- Do not add extra keys.
+- Do not return null values.
+- Ensure all JSON strings are properly escaped.
+"""
+
+
+
+    # --------------------------------------------------
+    # VALIDATE INPUT
+    # --------------------------------------------------
+
+    if not isinstance(job_role, str) or not job_role.strip():
+        raise ValueError("Invalid job role")
+
+    if not isinstance(interview_explanation, str) or not interview_explanation.strip():
+        raise ValueError("Interview explanation cannot be empty")
+
+    if not isinstance(resume_skills, list):
+        raise ValueError("Resume skills must be a list")
+
+    if not isinstance(course_type, str):
+        course_type = ""
+
+    # --------------------------------------------------
+    # PREPARE USER INPUT
+    # --------------------------------------------------
+
+    user_prompt = f"""
+Job Role:
+{job_role}
+
+Course Type:
+{course_type}
+
+Resume Skills:
+{json.dumps(resume_skills, ensure_ascii=False)}
+
+Candidate's Interview Experiences:
+
+{interview_explanation}
+"""
+
+    # --------------------------------------------------
+    # CALL OLLAMA
+    # --------------------------------------------------
+
+    try:
+
+        response = ollama.chat(
+            model=MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": SYSTEM_PROMPT
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt
+                }
+            ],
+            format="json",
+            options={
+                "temperature": 0.3
+            }
+        )
+
+        raw_response = response["message"]["content"]
+
+        if not raw_response or not raw_response.strip():
+            raise ValueError("AI returned an empty response")
+
+        # --------------------------------------------------
+        # PARSE JSON
+        # --------------------------------------------------
+
+        try:
+            analysis = json.loads(raw_response)
+
+        except json.JSONDecodeError as error:
+            print("AI JSON parsing error:", error)
+            print("Raw AI response:", raw_response)
+
+            raise ValueError(
+                "AI returned invalid JSON"
+            )
+
+        if not isinstance(analysis, dict):
+            raise ValueError("AI response must be a JSON object")
+
+        # --------------------------------------------------
+        # VALIDATE TOP LEVEL STRUCTURE
+        # --------------------------------------------------
+
+        required_fields = [
+            "overall_assessment",
+            "main_patterns",
+            "possible_underlying_reasons",
+            "unnoticed_insights",
+            "improvement_priorities",
+            "next_interview_strategy"
+        ]
+
+        for field in required_fields:
+
+            if field not in analysis:
+                raise ValueError(
+                    f"Missing AI response field: {field}"
+                )
+
+        if not isinstance(
+            analysis["overall_assessment"], str
+        ) or not analysis["overall_assessment"].strip():
+
+            raise ValueError(
+                "Invalid overall_assessment"
+            )
+
+        array_fields = [
+            "main_patterns",
+            "possible_underlying_reasons",
+            "unnoticed_insights",
+            "improvement_priorities",
+            "next_interview_strategy"
+        ]
+
+        # --------------------------------------------------
+        # NORMALIZE ARRAY FIELDS
+        # --------------------------------------------------
+
+        for field in array_fields:
+
+            value = analysis[field]
+
+            if isinstance(value, str):
+
+                value = value.strip()
+
+                if value:
+                    value = [value]
+                else:
+                    value = []
+
+                analysis[field] = value
+
+            elif value is None:
+
+                analysis[field] = []
+
+            elif not isinstance(value, list):
+
+                raise ValueError(
+                    f"Invalid format for {field}"
+                )
+
+        # --------------------------------------------------
+        # VALIDATE MAIN PATTERNS
+        # --------------------------------------------------
+
+        for item in analysis["main_patterns"]:
+
+            if not isinstance(item, dict):
+                raise ValueError(
+                    "Invalid main_patterns object"
+                )
+
+            required = [
+                "pattern",
+                "observation",
+                "why_it_matters",
+                "confidence"
+            ]
+
+            for field in required:
+
+                if not isinstance(item.get(field), str) or not item[field].strip():
+                    raise ValueError(
+                        f"Invalid main_patterns field: {field}"
+                    )
+
+            item["confidence"] = item["confidence"].lower().strip()
+
+            if item["confidence"] not in [
+                "high", "medium", "low"
+            ]:
+                item["confidence"] = "low"
+
+        # --------------------------------------------------
+        # VALIDATE UNDERLYING REASONS
+        # --------------------------------------------------
+
+        for item in analysis["possible_underlying_reasons"]:
+
+            if not isinstance(item, dict):
+                raise ValueError(
+                    "Invalid possible_underlying_reasons object"
+                )
+
+            required = [
+                "reason",
+                "explanation",
+                "supporting_observation",
+                "confidence"
+            ]
+
+            for field in required:
+
+                if not isinstance(item.get(field), str) or not item[field].strip():
+                    raise ValueError(
+                        f"Invalid underlying reason field: {field}"
+                    )
+
+            item["confidence"] = item["confidence"].lower().strip()
+
+            if item["confidence"] not in [
+                "high", "medium", "low"
+            ]:
+                item["confidence"] = "low"
+
+        # --------------------------------------------------
+        # VALIDATE UNNOTICED INSIGHTS
+        # --------------------------------------------------
+
+        for item in analysis["unnoticed_insights"]:
+
+            if not isinstance(item, dict):
+                raise ValueError(
+                    "Invalid unnoticed_insights object"
+                )
+
+            required = [
+                "insight",
+                "explanation",
+                "practical_tip"
+            ]
+
+            for field in required:
+
+                if not isinstance(item.get(field), str) or not item[field].strip():
+                    raise ValueError(
+                        f"Invalid unnoticed insight field: {field}"
+                    )
+
+        # --------------------------------------------------
+        # VALIDATE IMPROVEMENT PRIORITIES
+        # --------------------------------------------------
+
+        for item in analysis["improvement_priorities"]:
+
+            if not isinstance(item, dict):
+                raise ValueError(
+                    "Invalid improvement_priorities object"
+                )
+
+            required = [
+                "priority",
+                "action",
+                "practice"
+            ]
+
+            for field in required:
+
+                if not isinstance(item.get(field), str) or not item[field].strip():
+                    raise ValueError(
+                        f"Invalid improvement priority field: {field}"
+                    )
+
+        # --------------------------------------------------
+        # VALIDATE NEXT INTERVIEW STRATEGY
+        # --------------------------------------------------
+
+        valid_strategies = []
+
+        for item in analysis["next_interview_strategy"]:
+
+            if isinstance(item, str) and item.strip():
+
+                valid_strategies.append(item.strip())
+
+            elif isinstance(item, dict):
+
+                # Handle unexpected object output safely.
+                strategy = (
+                    item.get("strategy")
+                    or item.get("action")
+                    or item.get("tip")
+                )
+
+                if isinstance(strategy, str) and strategy.strip():
+                    valid_strategies.append(strategy.strip())
+
+        analysis["next_interview_strategy"] = valid_strategies
+
+        # --------------------------------------------------
+        # FINAL RESPONSE
+        # --------------------------------------------------
+
+        return analysis
+
+    except Exception as error:
+
+        print(
+            f"Interview analysis error: {str(error)}"
+        )
+
+        raise
+
+def verify_report_evidence(
+    evidence: str,
+    interview_explanation: str
+) -> bool:
+
+    import re
+    from collections import Counter
+
+    if not isinstance(evidence, str) or not evidence.strip():
+        return False
+
+    if not isinstance(interview_explanation, str):
+        return False
+
+    def normalize(text):
+        return re.findall(
+            r"\b[a-z0-9]+\b",
+            text.lower()
+        )
+
+    stop_words = {
+        "i", "a", "an", "the", "and", "but",
+        "to", "of", "with", "in", "my", "was",
+        "were", "is", "am", "it", "during",
+        "on", "for", "at", "this", "that"
+    }
+
+    evidence_words = [
+        word for word in normalize(evidence)
+        if word not in stop_words
+    ]
+
+    explanation_words = normalize(interview_explanation)
+
+    if not evidence_words:
+        return False
+
+    evidence_counts = Counter(evidence_words)
+    explanation_counts = Counter(explanation_words)
+
+    matched_words = sum(
+        min(count, explanation_counts[word])
+        for word, count in evidence_counts.items()
+    )
+
+    match_ratio = matched_words / len(evidence_words)
+
+    return match_ratio >= 0.80
+
+
+
+def verify_report_evidence(
+    evidence: str,
+    interview_explanation: str
+) -> bool:
+
+    if not isinstance(evidence, str) or not evidence.strip():
+        return False
+
+    if not isinstance(interview_explanation, str):
+        return False
+
+    def normalize(text):
+        return " ".join(text.casefold().split())
+
+    normalized_evidence = normalize(evidence)
+    normalized_explanation = normalize(interview_explanation)
+
+    return normalized_evidence in normalized_explanation
+
+
+def validate_interview_analysis(
+    analysis: dict,
+    interview_explanation: str
+) -> dict:
+
+    if not isinstance(analysis, dict):
+        raise ValueError("AI returned invalid analysis format")
+
+    if not isinstance(interview_explanation, str):
+        raise ValueError("Invalid interview explanation")
+
+    # --------------------------------------------------
+    # REQUIRED TOP-LEVEL FIELDS
+    # --------------------------------------------------
+
+    required_fields = {
+        "overall_assessment": str,
+        "main_patterns": list,
+        "possible_underlying_reasons": list,
+        "unnoticed_insights": list,
+        "improvement_priorities": list,
+        "next_interview_strategy": list
+    }
+
+    for field, expected_type in required_fields.items():
+
+        value = analysis.get(field)
+
+        if not isinstance(value, expected_type):
+            raise ValueError(
+                f"Invalid format for {field}"
+            )
+
+    if not analysis["overall_assessment"].strip():
+        raise ValueError("Overall assessment cannot be empty")
+
+    # --------------------------------------------------
+    # NESTED FIELD DEFINITIONS
+    # --------------------------------------------------
+
+    sections = {
+        "main_patterns": [
+            "pattern",
+            "observation",
+            "why_it_matters",
+            "confidence"
+        ],
+        "possible_underlying_reasons": [
+            "reason",
+            "explanation",
+            "supporting_observation",
+            "confidence"
+        ],
+        "unnoticed_insights": [
+            "insight",
+            "explanation",
+            "practical_tip"
+        ],
+        "improvement_priorities": [
+            "priority",
+            "action",
+            "practice"
+        ]
+    }
+
+    valid_confidence = {"high", "medium", "low"}
+
+    # --------------------------------------------------
+    # VALIDATE REPORT SECTIONS
+    # --------------------------------------------------
+
+    for section_name, required_keys in sections.items():
+
+        valid_items = []
+
+        for index, item in enumerate(analysis[section_name]):
+
+            if not isinstance(item, dict):
+                print(
+                    f"Rejected invalid item in {section_name}: {index}"
+                )
+                continue
+
+            if not all(
+                isinstance(item.get(key), str)
+                and item[key].strip()
+                for key in required_keys
+            ):
+                print(
+                    f"Rejected incomplete item in {section_name}: {index}"
+                )
+                continue
+
+            # Normalize confidence
+            if "confidence" in item:
+
+                confidence = item["confidence"].casefold().strip()
+
+                if confidence not in valid_confidence:
+                    confidence = "low"
+
+                item["confidence"] = confidence
+
+            # --------------------------------------------------
+            # EVIDENCE GROUNDING
+            # --------------------------------------------------
+            # Observations and supporting observations should
+            # be traceable to the candidate's actual input.
+            # Interpretations and recommendations are not
+            # required to be exact source quotations.
+
+            evidence_field = None
+
+            if section_name == "main_patterns":
+                evidence_field = "observation"
+
+            elif section_name == "possible_underlying_reasons":
+                evidence_field = "supporting_observation"
+
+            if evidence_field:
+
+                evidence = item[evidence_field]
+
+                if not verify_report_evidence(
+                    evidence,
+                    interview_explanation
+                ):
+                    print(
+                        f"Warning: Evidence is not an exact source "
+                        f"match in {section_name}: {item.get('pattern', item.get('reason'))}"
+                    )
+
+                    # Do not reject automatically.
+                    # AI may reasonably paraphrase rough memories.
+                    # Structural validation and semantic grounding
+                    # are different checks.
+
+            valid_items.append(item)
+
+        analysis[section_name] = valid_items
+
+    # --------------------------------------------------
+    # VALIDATE NEXT INTERVIEW STRATEGY
+    # --------------------------------------------------
+
+    valid_strategies = []
+
+    for strategy in analysis["next_interview_strategy"]:
+
+        if isinstance(strategy, str) and strategy.strip():
+            valid_strategies.append(strategy.strip())
+
+    analysis["next_interview_strategy"] = valid_strategies
+
+    return analysis
+
+
+# def validate_interview_reports(
+#     reports: list,
+#     course_type: str,
+#     interview_explanation: str,
+#     resume_skills: list
+# ) -> list:
+
+#     valid_reports = []
+
+#     allowed_categories = {
+#         "technical_gap": "technical",
+#         "resume_skill_mismatch": "technical",
+#         "technical_answer_mistake": "technical",
+#         "communication_mistake": "communication",
+#         "coding_practice": "coding",
+#         "other_relevant_issue": "behavioural",
+#     }
+
+#     normalized_skills = {
+#         " ".join(skill.lower().split())
+#         for skill in resume_skills
+#         if isinstance(skill, str) and skill.strip()
+#     }
+
+#     for report in reports:
+
+#         if not isinstance(report, dict):
+#             continue
+
+#         report_type = report.get("report_type")
+#         evidence_category = report.get("evidence_category")
+#         evidence = report.get("evidence")
+
+#         if report_type not in allowed_categories:
+#             continue
+
+#         if not verify_report_evidence(
+#             evidence,
+#             interview_explanation
+#         ):
+#             continue
+
+#         if evidence_category != allowed_categories[report_type]:
+#             continue
+
+#         if report_type == "resume_skill_mismatch":
+
+#             evidence_lower = " ".join(
+#                 evidence.lower().split()
+#             )
+
+#             if not any(
+#                 skill in evidence_lower
+#                 for skill in normalized_skills
+#             ):
+#                 continue
+
+#         if (
+#             report_type == "coding_practice"
+#             and course_type.strip().lower() != "coding"
+#         ):
+#             continue
+
+#         valid_reports.append(report)
+
+#     return valid_reports
+
+
+
+
+
+def generate_analysis_pdf(
+    heading: str,
+    description: str,
+    content: str
+) -> str:
+
+    import os
+    import uuid
+    import re
+
+    from xml.sax.saxutils import escape
+
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import (
+        getSampleStyleSheet,
+        ParagraphStyle
+    )
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Paragraph,
+        Spacer,
+        HRFlowable,
+        KeepTogether
+    )
+
+    # --------------------------------------------------
+    # FILE PATH
+    # --------------------------------------------------
+
+    os.makedirs(INTERVIEW_ANALYSIS_DIR, exist_ok=True)
+
+    filename = f"{uuid.uuid4()}.pdf"
+
+    file_path = os.path.join(
+        INTERVIEW_ANALYSIS_DIR,
+        filename
+    )
+
+    # --------------------------------------------------
+    # COLORS
+    # --------------------------------------------------
+
+    navy = colors.HexColor("#17365D")
+    blue = colors.HexColor("#1F4E79")
+    light_blue = colors.HexColor("#EAF1F8")
+    grey = colors.HexColor("#555555")
+    light_grey = colors.HexColor("#D9E2F3")
+
+    # --------------------------------------------------
+    # STYLES
+    # --------------------------------------------------
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=20,
+        leading=26,
+        alignment=TA_CENTER,
+        textColor=navy,
+        spaceAfter=20,
+    )
+
+    summary_heading_style = ParagraphStyle(
+        "SummaryHeading",
+        parent=styles["Heading2"],
+        fontSize=14,
+        leading=19,
+        textColor=navy,
+        spaceBefore=8,
+        spaceAfter=10,
+    )
+
+    summary_body_style = ParagraphStyle(
+        "SummaryBody",
+        parent=styles["BodyText"],
+        fontSize=10,
+        leading=16,
+        textColor=grey,
+        spaceAfter=12,
+    )
+
+    section_heading_style = ParagraphStyle(
+        "SectionHeading",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=14,
+        leading=19,
+        textColor=navy,
+        spaceBefore=20,
+        spaceAfter=10,
+        keepWithNext=True,
+    )
+
+    subheading_style = ParagraphStyle(
+        "Subheading",
+        parent=styles["Heading3"],
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        leading=14,
+        textColor=blue,
+        spaceBefore=8,
+        spaceAfter=4,
+        keepWithNext=True,
+    )
+
+    body_style = ParagraphStyle(
+        "ReportBody",
+        parent=styles["BodyText"],
+        fontSize=9.5,
+        leading=15,
+        textColor=colors.HexColor("#333333"),
+        spaceAfter=7,
+        alignment=0,
+        splitLongWords=1,
+    )
+
+    number_style = ParagraphStyle(
+        "NumberStyle",
+        parent=body_style,
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        textColor=navy,
+        spaceBefore=10,
+        spaceAfter=6,
+        keepWithNext=True,
+    )
+
+    confidence_style = ParagraphStyle(
+        "ConfidenceStyle",
+        parent=body_style,
+        fontSize=9,
+        textColor=grey,
+        spaceBefore=2,
+        spaceAfter=8,
+    )
+
+    # --------------------------------------------------
+    # DOCUMENT CONTENT
+    # --------------------------------------------------
+
+    story = []
+
+    # Title
+    story.append(
+        Paragraph(
+            escape(heading),
+            title_style
+        )
+    )
+
+    story.append(
+        HRFlowable(
+            width="100%",
+            thickness=1,
+            color=light_grey,
+            spaceAfter=18
+        )
+    )
+
+    # Overall assessment
+    story.append(
+        Paragraph(
+            "Overall Assessment",
+            summary_heading_style
+        )
+    )
+
+    story.append(
+        Paragraph(
+            escape(description).replace("\n", "<br/>"),
+            summary_body_style
+        )
+    )
+
+    story.append(
+        HRFlowable(
+            width="100%",
+            thickness=0.8,
+            color=light_grey,
+            spaceBefore=8,
+            spaceAfter=12
+        )
+    )
+
+    # --------------------------------------------------
+    # CONTENT PARSING
+    # --------------------------------------------------
+
+    lines = content.splitlines()
+
+    section_titles = {
+        "MAIN INTERVIEW PATTERNS",
+        "POSSIBLE UNDERLYING REASONS",
+        "UNNOTICED INSIGHTS",
+        "IMPROVEMENT PRIORITIES",
+        "NEXT INTERVIEW STRATEGY",
+    }
+
+    for line in lines:
+
+        line = line.strip()
+
+        if not line:
+            story.append(Spacer(1, 3))
+            continue
+
+        # Ignore separator lines
+        if re.fullmatch(r"[=]{3,}", line):
+            continue
+
+        # Main section headings
+        if line.upper() in section_titles:
+
+            story.append(
+                Spacer(1, 8)
+            )
+
+            story.append(
+                Paragraph(
+                    escape(line.title()),
+                    section_heading_style
+                )
+            )
+
+            story.append(
+                HRFlowable(
+                    width="100%",
+                    thickness=0.6,
+                    color=light_grey,
+                    spaceAfter=10
+                )
+            )
+
+            continue
+
+        # Numbered items
+        if re.match(r"^\d+\.\s+", line):
+
+            story.append(
+                Paragraph(
+                    escape(line),
+                    number_style
+                )
+            )
+
+            continue
+
+        # Field labels
+        if line.endswith(":") and len(line) < 60:
+
+            story.append(
+                Paragraph(
+                    escape(line),
+                    subheading_style
+                )
+            )
+
+            continue
+
+        # Confidence values
+        if line.lower().startswith("confidence:"):
+
+            story.append(
+                Paragraph(
+                    escape(line),
+                    confidence_style
+                )
+            )
+
+            continue
+
+        # Normal paragraph
+        story.append(
+            Paragraph(
+                escape(line).replace("\n", "<br/>"),
+                body_style
+            )
+        )
+
+    # --------------------------------------------------
+    # PDF DOCUMENT
+    # --------------------------------------------------
+
+    document = SimpleDocTemplate(
+        file_path,
+        pagesize=A4,
+        rightMargin=0.75 * inch,
+        leftMargin=0.75 * inch,
+        topMargin=0.7 * inch,
+        bottomMargin=0.7 * inch,
+        title=heading,
+        author="Job Portal AI",
+    )
+
+    document.build(story)
+
+    return file_path
 
 class ChatbotQuestion(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
@@ -1586,6 +3124,11 @@ def upload_student_resume(
         )
 
     # 4. Save the file
+    resume_dir = os.path.join(UPLOADS_DIR, "resumes")
+    os.makedirs(resume_dir, exist_ok=True)
+
+    file_path = os.path.join(resume_dir, filename)
+
     with open(file_path, "wb") as f:
         f.write(file_content)
 
@@ -1594,7 +3137,7 @@ def upload_student_resume(
         student_id=student.id,
         file_type="application/pdf",
         file_size=len(file_content),
-        file_path=f"resumes/{filename}",
+        file_path=os.path.join(UPLOADS_DIR, "resumes", filename),
         is_active="active",
     )
 
@@ -2894,44 +4437,237 @@ def claim_training_eligibility(
         "claimed_by": employee.id,
     }
 
+
 @app.patch("/employee/training-eligibilities/{eligibility_id}/approve")
 def approve_training_eligibility(
     eligibility_id: int,
     db: Session = Depends(get_db),
     employee=Depends(require_employee),
 ):
-    eligibility = db.query(models.TrainingEligibility).filter(
-        models.TrainingEligibility.id == eligibility_id
-    ).first()
-
-    if not eligibility:
-        raise HTTPException(status_code=404, detail="Training eligibility not found")
-
-    if eligibility.claimed_by != employee.id:
-        raise HTTPException(
-            status_code=403,
-            detail="Only the employee who claimed this eligibility can approve it"
+    try:
+        # 1. Get and lock eligibility
+        eligibility = (
+            db.query(models.TrainingEligibility)
+            .filter(
+                models.TrainingEligibility.id == eligibility_id
+            )
+            .with_for_update()
+            .first()
         )
 
-    if eligibility.status != "Pending":
-        raise HTTPException(
-            status_code=409,
-            detail="This eligibility has already been reviewed"
+        if not eligibility:
+            raise HTTPException(
+                status_code=404,
+                detail="Training eligibility not found"
+            )
+
+        if eligibility.claimed_by != employee.id:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the employee who claimed this eligibility can approve it"
+            )
+
+        if eligibility.status != "Pending":
+            raise HTTPException(
+                status_code=409,
+                detail="This eligibility has already been reviewed"
+            )
+
+        # 2. Retrieve the exact 3 frozen applications
+        application_records = (
+            db.query(
+                models.Application,
+                models.Vacancy,
+                models.Resume
+            )
+            .join(
+                models.TrainingEligibilityApplication,
+                models.TrainingEligibilityApplication.application_id
+                == models.Application.application_id
+            )
+            .join(
+                models.Vacancy,
+                models.Vacancy.id == models.Application.vacancy_id
+            )
+            .join(
+                models.Resume,
+                models.Resume.resume_id == models.Application.resume_id
+            )
+            .filter(
+                models.TrainingEligibilityApplication.eligibility_id
+                == eligibility.id,
+                models.Application.student_id == eligibility.student_id,
+                models.Resume.student_id == eligibility.student_id
+            )
+            .order_by(models.Application.application_id.asc())
+            .all()
         )
 
-    eligibility.status = "Approved"
-    eligibility.reviewed_by = employee.id
-    eligibility.reviewed_at = datetime.now()
+        if len(application_records) != 3:
+            raise HTTPException(
+                status_code=409,
+                detail="Exactly 3 valid rejected applications are required"
+            )
 
-    db.commit()
-    db.refresh(eligibility)
+        # 3. Group applications by unique job role
+        role_groups = {}
 
-    return {
-        "message": "Training eligibility approved successfully",
-        "eligibility_id": eligibility.id,
-        "status": eligibility.status,
-        "reviewed_by": eligibility.reviewed_by,
-    }
+        for application, vacancy, resume in application_records:
+            job_role = vacancy.title.strip()
+
+            if not job_role:
+                raise HTTPException(
+                    status_code=400,
+                    detail="An application has an empty job role"
+                )
+
+            role_key = job_role.casefold()
+
+            if role_key not in role_groups:
+                role_groups[role_key] = {
+                    "job_role": job_role,
+                    "applications": [],
+                    "resume_texts": []
+                }
+
+            resume_text = (
+                resume.extracted_text.strip()
+                if resume.extracted_text
+                and resume.extracted_text.strip()
+                else extract_resume_text(resume.file_path)
+            )
+
+            role_groups[role_key]["applications"].append(application)
+            role_groups[role_key]["resume_texts"].append(resume_text)
+
+        # 4. Generate one course for each unique job role
+        created_courses = []
+
+        for role_data in role_groups.values():
+
+            job_role = role_data["job_role"]
+
+            # Llama decides Coding / Non-Coding
+            try:
+                course_type = classify_training_course_type(
+                    job_role,
+                    role_data["resume_texts"]
+                )
+            except Exception as ai_error:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"AI course classification failed for {job_role}: {str(ai_error)}"
+                )
+
+            # Create course
+            course = models.TrainingCourse(
+                eligibility_id=eligibility.id,
+                course_type=course_type,
+                job_role=job_role,
+                created_by=employee.id,
+                status="Active"
+            )
+
+            db.add(course)
+            db.flush()
+
+            # Link this course to its corresponding applications
+            for application in role_data["applications"]:
+                db.add(
+                    models.TrainingCourseApplication(
+                        course_id=course.id,
+                        application_id=application.application_id
+                    )
+                )
+
+            # Create separate enrollment for this course
+            enrollment = models.TrainingEnrollment(
+                eligibility_id=eligibility.id,
+                student_id=eligibility.student_id,
+                course_id=course.id,
+                status="Active"
+            )
+
+            db.add(enrollment)
+
+            created_courses.append({
+                "course_id": course.id,
+                "job_role": job_role,
+                "course_type": course_type
+            })
+
+        # 5. Update eligibility status
+        eligibility.status = "Approved"
+        eligibility.reviewed_by = employee.id
+        eligibility.reviewed_at = datetime.now()
+
+        # 6. Update the approving employee's existing notification
+        employee_notification = (
+            db.query(models.EmployeeNotification)
+            .filter(
+                models.EmployeeNotification.employee_id == employee.id,
+                models.EmployeeNotification.training_eligibility_id
+                == eligibility.id
+            )
+            .first()
+        )
+
+        employee_message = (
+            f"Training courses created successfully for "
+            f"student ID {eligibility.student_id}. "
+            f"Total courses: {len(created_courses)}."
+        )
+
+        if employee_notification:
+            employee_notification.message = employee_message
+            employee_notification.is_read = False
+        else:
+            db.add(
+                models.EmployeeNotification(
+                    employee_id=employee.id,
+                    training_eligibility_id=eligibility.id,
+                    message=employee_message,
+                    is_read=False
+                )
+            )
+
+        # 7. Notify the student
+        student_notification = models.Notification(
+            student_id=eligibility.student_id,
+            application_id=None,
+            message=(
+                f"Your training courses are ready! "
+                f"{len(created_courses)} course(s) have been created. "
+                f"Visit View Courses to access them."
+            ),
+            is_read=False
+        )
+
+        db.add(student_notification)
+
+        # 8. Commit everything together
+        db.commit()
+        db.refresh(eligibility)
+
+        return {
+            "message": "Training courses created successfully",
+            "eligibility_id": eligibility.id,
+            "status": eligibility.status,
+            "total_courses": len(created_courses),
+            "courses": created_courses
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to approve eligibility and create courses: {str(e)}"
+        )
+
 @app.post("/employee/training-eligibilities/{eligibility_id}/course")
 def create_training_course(
     eligibility_id: int,
@@ -3376,4 +5112,638 @@ def update_my_placed_status(
     return {
         "message": "Placed status updated successfully",
         "is_placed": current_user.is_placed,
+    }
+
+@app.get("/student/training-courses")
+def get_student_training_courses(
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    courses = (
+        db.query(
+            models.TrainingEnrollment,
+            models.TrainingEligibility,
+            models.TrainingCourse,
+        )
+        .join(
+            models.TrainingEligibility,
+            models.TrainingEligibility.id
+            == models.TrainingEnrollment.eligibility_id
+        )
+        .join(
+            models.TrainingCourse,
+            models.TrainingCourse.id
+            == models.TrainingEnrollment.course_id
+        )
+        .filter(
+            models.TrainingEnrollment.student_id == student.id,
+            models.TrainingEligibility.status == "Approved",
+        )
+        .order_by(
+            models.TrainingEnrollment.enrolled_at.desc()
+        )
+        .all()
+    )
+
+    return [
+        {
+            "enrollment_id": enrollment.id,
+            "course_id": course.id,
+            "job_role": course.job_role,
+            "course_type": course.course_type,
+            "enrolled_at": enrollment.enrolled_at,
+        }
+        for enrollment, eligibility, course in courses
+    ]
+@app.get("/student/training-courses/{enrollment_id}")
+def get_student_training_course_details(
+    enrollment_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    enrollment = (
+        db.query(models.TrainingEnrollment)
+        .filter(
+            models.TrainingEnrollment.id == enrollment_id,
+            models.TrainingEnrollment.student_id == student.id,
+        )
+        .first()
+    )
+
+    if not enrollment:
+        raise HTTPException(
+            status_code=404,
+            detail="Training course not found"
+        )
+
+    eligibility = (
+        db.query(models.TrainingEligibility)
+        .filter(
+            models.TrainingEligibility.id == enrollment.eligibility_id,
+            models.TrainingEligibility.status == "Approved",
+        )
+        .first()
+    )
+
+    if not eligibility:
+        raise HTTPException(
+            status_code=403,
+            detail="Training course is not approved"
+        )
+
+    course = (
+        db.query(models.TrainingCourse)
+        .filter(
+            models.TrainingCourse.id == enrollment.course_id
+        )
+        .first()
+    )
+
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Training course not found"
+        )
+
+    return {
+        "enrollment_id": enrollment.id,
+        "course_id": course.id,
+        "job_role": course.job_role,
+        "course_type": course.course_type,
+        "enrolled_at": enrollment.enrolled_at,
+    }
+
+
+
+@app.post("/student/training-analysis/analyze")
+def analyze_student_interview(
+    data: InterviewAnalysisCreate,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    # --------------------------------------------------
+    # 1. VERIFY STUDENT ENROLLMENT
+    # --------------------------------------------------
+
+    enrollment = (
+        db.query(models.TrainingEnrollment)
+        .filter(
+            models.TrainingEnrollment.id == data.enrollment_id,
+            models.TrainingEnrollment.student_id == student.id,
+        )
+        .first()
+    )
+
+    if not enrollment:
+        raise HTTPException(
+            status_code=404,
+            detail="Training course not found"
+        )
+
+    # --------------------------------------------------
+    # 2. VERIFY APPROVED ELIGIBILITY
+    # --------------------------------------------------
+
+    eligibility = (
+        db.query(models.TrainingEligibility)
+        .filter(
+            models.TrainingEligibility.id == enrollment.eligibility_id,
+            models.TrainingEligibility.status == "Approved",
+        )
+        .first()
+    )
+
+    if not eligibility:
+        raise HTTPException(
+            status_code=403,
+            detail="Training course is not approved"
+        )
+
+    # --------------------------------------------------
+    # 3. GET ASSIGNED COURSE
+    # --------------------------------------------------
+
+    course = (
+        db.query(models.TrainingCourse)
+        .filter(
+            models.TrainingCourse.id == enrollment.course_id
+        )
+        .first()
+    )
+
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Training course not found"
+        )
+
+    # --------------------------------------------------
+    # 4. GET STUDENT'S ACTIVE RESUME
+    # --------------------------------------------------
+
+    resume = (
+        db.query(models.Resume)
+        .filter(
+            models.Resume.student_id == student.id,
+            models.Resume.is_active == "active",
+        )
+        .order_by(models.Resume.uploaded_at.desc())
+        .first()
+    )
+
+    if not resume:
+        raise HTTPException(
+            status_code=400,
+            detail="Please upload an active resume before analysis."
+        )
+
+    resume_path = os.path.join(
+        UPLOADS_DIR,
+        resume.file_path
+    )
+
+    if not os.path.exists(resume_path):
+        raise HTTPException(
+            status_code=404,
+            detail="Resume file not found"
+        )
+
+    # --------------------------------------------------
+    # 5. EXTRACT RESUME AND PERFORM AI ANALYSIS
+    # --------------------------------------------------
+
+    try:
+        resume_text = extract_resume_text(resume_path)
+
+        resume_skills = extract_resume_skills(
+            resume_text
+        )
+
+        ai_result = analyze_interview_with_ai(
+            job_role=course.job_role,
+            course_type=course.course_type,
+            resume_skills=resume_skills,
+            interview_explanation=data.interview_explanation,
+        )
+
+    except Exception as e:
+        print(f"Interview analysis error: {str(e)}")
+
+        raise HTTPException(
+            status_code=502,
+            detail="Interview analysis failed. Please try again."
+        )
+
+    # --------------------------------------------------
+    # 6. VALIDATE HOLISTIC AI ANALYSIS
+    # --------------------------------------------------
+
+    try:
+        valid_analysis = validate_interview_analysis(
+            ai_result,
+            data.interview_explanation
+        )
+
+        print("\n========== VALIDATED AI ANALYSIS ==========")
+        print(
+            json.dumps(
+                valid_analysis,
+                indent=4,
+                ensure_ascii=False
+            )
+        )
+        print("========== END VALIDATED ANALYSIS ==========\n")
+
+    except Exception as e:
+        print(f"Interview validation error: {str(e)}")
+
+        raise HTTPException(
+            status_code=502,
+            detail="Interview analysis validation failed. Please try again."
+        )
+
+    # --------------------------------------------------
+    # 7. SAVE ANALYSIS HISTORY
+    # --------------------------------------------------
+
+    analysis = models.InterviewAnalysis(
+        student_id=student.id,
+        enrollment_id=enrollment.id,
+        job_role=course.job_role,
+        course_type=course.course_type,
+        resume_skills=resume_skills,
+        interview_explanation=data.interview_explanation,
+    )
+
+    try:
+        db.add(analysis)
+        db.commit()
+        db.refresh(analysis)
+
+    except Exception as e:
+        db.rollback()
+
+        print(f"Analysis database error: {str(e)}")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to save interview analysis."
+        )
+
+    # --------------------------------------------------
+    # 8. FORMAT HOLISTIC ANALYSIS FOR PDF
+    # --------------------------------------------------
+
+    generated_files = []
+
+    try:
+        combined_content = ""
+
+        # ----------------------------------------------
+        # MAIN PATTERNS
+        # ----------------------------------------------
+
+        combined_content += "\nMAIN INTERVIEW PATTERNS\n"
+        combined_content += "=" * 50 + "\n\n"
+
+        patterns = valid_analysis["main_patterns"]
+
+        if patterns:
+            for index, item in enumerate(patterns, start=1):
+
+                combined_content += f"""
+{index}. {item['pattern']}
+
+Observation:
+{item['observation']}
+
+Why It Matters:
+{item['why_it_matters']}
+
+Confidence:
+{item['confidence'].capitalize()}
+
+
+"""
+        else:
+            combined_content += "No clear recurring patterns identified.\n\n"
+
+        # ----------------------------------------------
+        # POSSIBLE UNDERLYING REASONS
+        # ----------------------------------------------
+
+        combined_content += "\nPOSSIBLE UNDERLYING REASONS\n"
+        combined_content += "=" * 50 + "\n\n"
+
+        reasons = valid_analysis["possible_underlying_reasons"]
+
+        if reasons:
+            for index, item in enumerate(reasons, start=1):
+
+                combined_content += f"""
+{index}. {item['reason']}
+
+Explanation:
+{item['explanation']}
+
+Supporting Observation:
+{item['supporting_observation']}
+
+Confidence:
+{item['confidence'].capitalize()}
+
+
+"""
+        else:
+            combined_content += "No sufficiently supported underlying reasons identified.\n\n"
+
+        # ----------------------------------------------
+        # UNNOTICED INSIGHTS
+        # ----------------------------------------------
+
+        combined_content += "\nUNNOTICED INSIGHTS\n"
+        combined_content += "=" * 50 + "\n\n"
+
+        insights = valid_analysis["unnoticed_insights"]
+
+        if insights:
+            for index, item in enumerate(insights, start=1):
+
+                combined_content += f"""
+{index}. {item['insight']}
+
+Explanation:
+{item['explanation']}
+
+Practical Tip:
+{item['practical_tip']}
+
+
+"""
+        else:
+            combined_content += "No additional insights identified.\n\n"
+
+        # ----------------------------------------------
+        # IMPROVEMENT PRIORITIES
+        # ----------------------------------------------
+
+        combined_content += "\nIMPROVEMENT PRIORITIES\n"
+        combined_content += "=" * 50 + "\n\n"
+
+        priorities = valid_analysis["improvement_priorities"]
+
+        if priorities:
+            for index, item in enumerate(priorities, start=1):
+
+                combined_content += f"""
+{index}. {item['priority']}
+
+Action:
+{item['action']}
+
+Practice:
+{item['practice']}
+
+
+"""
+        else:
+            combined_content += "No specific improvement priorities identified.\n\n"
+
+        # ----------------------------------------------
+        # NEXT INTERVIEW STRATEGY
+        # ----------------------------------------------
+
+        combined_content += "\nNEXT INTERVIEW STRATEGY\n"
+        combined_content += "=" * 50 + "\n\n"
+
+        strategies = valid_analysis["next_interview_strategy"]
+
+        if strategies:
+            for index, strategy in enumerate(strategies, start=1):
+
+                combined_content += f"{index}. {strategy}\n\n"
+        else:
+            combined_content += "No specific interview strategies generated.\n\n"
+
+        # ----------------------------------------------
+        # GENERATE PDF
+        # ----------------------------------------------
+
+        overall_assessment = valid_analysis["overall_assessment"]
+
+        pdf_path = generate_analysis_pdf(
+            heading="AI Interview Self-Analysis Report",
+            description=overall_assessment,
+            content=combined_content,
+        )
+
+        generated_files.append(pdf_path)
+
+        # ----------------------------------------------
+        # STORE RELATIVE PDF PATH
+        # ----------------------------------------------
+
+        relative_path = os.path.relpath(
+            pdf_path,
+            BASE_DIR
+        )
+
+        # ----------------------------------------------
+        # SAVE ONE DATABASE REPORT RECORD
+        # ----------------------------------------------
+
+        report_record = models.InterviewAnalysisReport(
+            analysis_id=analysis.id,
+            heading="AI Interview Self-Analysis Report",
+            description=overall_assessment,
+            report_type="combined_analysis",
+            pdf_path=relative_path,
+        )
+
+        db.add(report_record)
+        db.commit()
+        db.refresh(report_record)
+
+    except Exception as e:
+        db.rollback()
+
+        for file_path in generated_files:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+        print(f"Report generation error: {str(e)}")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate or save combined analysis report."
+        )
+
+    # --------------------------------------------------
+    # 9. RETURN HOLISTIC ANALYSIS
+    # --------------------------------------------------
+
+    return {
+        "message": "Interview self-analysis completed",
+        "analysis_id": analysis.id,
+        "overall_assessment": valid_analysis["overall_assessment"],
+        "main_patterns": valid_analysis["main_patterns"],
+        "possible_underlying_reasons": valid_analysis["possible_underlying_reasons"],
+        "unnoticed_insights": valid_analysis["unnoticed_insights"],
+        "improvement_priorities": valid_analysis["improvement_priorities"],
+        "next_interview_strategy": valid_analysis["next_interview_strategy"],
+        "resume_skills": resume_skills,
+        "report": {
+            "id": report_record.id,
+            "heading": report_record.heading,
+            "description": report_record.description,
+            "report_type": report_record.report_type,
+            "created_at": report_record.created_at,
+        },
+    }
+
+
+@app.get("/student/training-analysis/{analysis_id}/reports")
+def get_student_analysis_reports(
+    analysis_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    analysis = (
+        db.query(models.InterviewAnalysis)
+        .filter(
+            models.InterviewAnalysis.id == analysis_id,
+            models.InterviewAnalysis.student_id == student.id,
+        )
+        .first()
+    )
+
+    if not analysis:
+        raise HTTPException(
+            status_code=404,
+            detail="Analysis not found"
+        )
+
+    report = (
+        db.query(models.InterviewAnalysisReport)
+        .filter(
+            models.InterviewAnalysisReport.analysis_id == analysis.id
+        )
+        .order_by(
+            models.InterviewAnalysisReport.id.desc()
+        )
+        .first()
+    )
+
+    if not report:
+        raise HTTPException(
+            status_code=404,
+            detail="Analysis report not found"
+        )
+
+    return {
+        "id": report.id,
+        "analysis_id": report.analysis_id,
+        "heading": report.heading,
+        "description": report.description,
+        "report_type": report.report_type,
+        "created_at": report.created_at,
+    }
+
+
+@app.get("/student/training-analysis/reports/{report_id}/pdf")
+def view_student_analysis_report(
+    report_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    report = (
+        db.query(models.InterviewAnalysisReport)
+        .join(
+            models.InterviewAnalysis,
+            models.InterviewAnalysis.id
+            == models.InterviewAnalysisReport.analysis_id,
+        )
+        .filter(
+            models.InterviewAnalysisReport.id == report_id,
+            models.InterviewAnalysis.student_id == student.id,
+        )
+        .first()
+    )
+
+    if not report:
+        raise HTTPException(
+            status_code=404,
+            detail="Report not found"
+        )
+
+    pdf_path = os.path.join(
+        BASE_DIR,
+        report.pdf_path
+    )
+
+    if not os.path.exists(pdf_path):
+        raise HTTPException(
+            status_code=404,
+            detail="PDF file not found"
+        )
+
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        filename=f"interview_report_{report.id}.pdf",
+        content_disposition_type="inline",
+    )
+
+
+@app.get("/student/training-courses")
+def get_student_training_courses(
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+
+    courses = (
+        db.query(
+            models.TrainingEnrollment,
+            models.TrainingCourse
+        )
+        .join(
+            models.TrainingCourse,
+            models.TrainingCourse.id
+            == models.TrainingEnrollment.course_id
+        )
+        .join(
+            models.TrainingEligibility,
+            models.TrainingEligibility.id
+            == models.TrainingEnrollment.eligibility_id
+        )
+        .filter(
+            models.TrainingEnrollment.student_id == student.id,
+            models.TrainingEligibility.status == "Approved",
+            models.TrainingCourse.status == "Active"
+        )
+        .order_by(
+            models.TrainingEnrollment.enrolled_at.desc()
+        )
+        .all()
+    )
+
+    result = []
+
+    for enrollment, course in courses:
+
+        result.append({
+            "enrollment_id": enrollment.id,
+            "course_id": course.id,
+            "eligibility_id": enrollment.eligibility_id,
+            "job_role": course.job_role,
+            "course_type": course.course_type,
+            "course_status": course.status,
+            "enrollment_status": enrollment.status,
+            "enrolled_at": enrollment.enrolled_at,
+            "completed_at": enrollment.completed_at
+        })
+
+    return {
+        "total_courses": len(result),
+        "courses": result
     }

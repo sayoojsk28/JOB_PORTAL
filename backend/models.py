@@ -4,6 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import relationship
 from sqlalchemy import UniqueConstraint
 from database import Base
+from sqlalchemy import JSON
 
 
 class Student(Base):
@@ -33,6 +34,10 @@ class Student(Base):
     nullable=False,
     default=False,
     server_default=text("false")
+)
+    training_rejection_baseline_at = Column(
+    DateTime(timezone=True),
+    nullable=True
 )
     
     status = Column(String(20),nullable=False,default="Pending",server_default=text("'Pending'"))
@@ -198,6 +203,7 @@ class Vacancy(Base):
         nullable=False
     )
 
+
 class Resume(Base):
     __tablename__ = "resumes"
 
@@ -213,6 +219,9 @@ class Resume(Base):
     file_size = Column(BigInteger, nullable=False)
     file_path = Column(String(500), nullable=False)
 
+    extracted_text = Column(Text, nullable=True)
+    extracted_skills = Column(JSON, nullable=True)
+
     uploaded_at = Column(
         DateTime,
         nullable=False,
@@ -225,6 +234,7 @@ class Resume(Base):
         default="active",
         server_default=text("'active'"),
     )
+
 
 
 class Application(Base):
@@ -567,6 +577,13 @@ class TrainingEligibility(Base):
 
 class TrainingCourse(Base):
     __tablename__ = "training_courses"
+    __table_args__ = (
+    UniqueConstraint(
+        "eligibility_id",
+        "job_role",
+        name="uq_training_course_eligibility_role"
+    ),
+)
 
     id = Column(Integer, primary_key=True, index=True)
 
@@ -598,56 +615,88 @@ class TrainingCourse(Base):
         default="Active",
         server_default=text("'Active'"),
     )
+    eligibility_id = Column(
+    Integer,
+    ForeignKey("training_eligibility.id"),
+    nullable=True,
+    index=True
+    )
+
+
+class TrainingCourseApplication(Base):
+    __tablename__ = "training_course_applications"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "course_id",
+            "application_id",
+            name="uq_training_course_application"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    course_id = Column(
+        Integer,
+        ForeignKey("training_courses.id"),
+        nullable=False,
+        index=True
+    )
+
+    application_id = Column(
+        Integer,
+        ForeignKey("applications.application_id"),
+        nullable=False,
+        index=True
+    )
+
+
 
 
 class TrainingEnrollment(Base):
     __tablename__ = "training_enrollments"
-
-    __table_args__ = (
-        UniqueConstraint(
-            "eligibility_id",
-            name="uq_training_enrollment_eligibility"
-        ),
-    )
 
     id = Column(Integer, primary_key=True, index=True)
 
     eligibility_id = Column(
         Integer,
         ForeignKey("training_eligibility.id"),
-        nullable=False,
+        nullable=False
     )
 
     student_id = Column(
         Integer,
         ForeignKey("students.id"),
         nullable=False,
-        index=True,
+        index=True
     )
 
     course_id = Column(
         Integer,
         ForeignKey("training_courses.id"),
-        nullable=False,
+        nullable=False
     )
 
     status = Column(
         String(20),
         nullable=False,
         default="Active",
-        server_default=text("'Active'"),
+        server_default=text("'Active'")
     )
 
     enrolled_at = Column(
         DateTime,
         nullable=False,
-        server_default=func.now(),
+        server_default=func.now()
     )
 
     completed_at = Column(
-    DateTime(timezone=True),
-    nullable=True,
-)
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    
+
 
 class TrainingResume(Base):
     __tablename__ = "training_resumes"
@@ -699,6 +748,10 @@ class TrainingResume(Base):
     extracted_skills = Column(
         Text,
         nullable=True,
+    )
+    extracted_text = Column(
+    Text,
+    nullable=True,
     )
 
 class TrainingPart(Base):
@@ -879,4 +932,146 @@ class TrainingAttemptAnswer(Base):
         DateTime,
         nullable=False,
         server_default=func.now(),
+    )
+
+class InterviewAnalysis(Base):
+    __tablename__ = "interview_analyses"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    student_id = Column(
+        Integer,
+        ForeignKey("students.id"),
+        nullable=False,
+        index=True
+    )
+
+    enrollment_id = Column(
+        Integer,
+        ForeignKey("training_enrollments.id"),
+        nullable=False,
+        index=True
+    )
+
+    job_role = Column(String(150), nullable=False)
+
+    course_type = Column(String(20), nullable=False)
+
+    resume_skills = Column(JSON, nullable=False)
+
+    interview_explanation = Column(Text, nullable=False)
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now()
+    )
+class InterviewAnalysisReport(Base):
+    __tablename__ = "interview_analysis_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    analysis_id = Column(
+        Integer,
+        ForeignKey("interview_analyses.id"),
+        nullable=False,
+        index=True
+    )
+
+    heading = Column(String(200), nullable=False)
+
+    description = Column(Text, nullable=False)
+
+    report_type = Column(String(50), nullable=False)
+
+    pdf_path = Column(String(500), nullable=False)
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now()
+    )
+
+
+class TrainingQuestionnaire(Base):
+    __tablename__ = "training_questionnaires"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "enrollment_id",
+            name="uq_training_questionnaire_enrollment"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    enrollment_id = Column(
+        Integer,
+        ForeignKey("training_enrollments.id"),
+        nullable=False,
+        index=True,
+    )
+
+    resume_id = Column(
+        Integer,
+        ForeignKey("training_resumes.id"),
+        nullable=False,
+        index=True,
+    )
+
+    questions = Column(
+        JSON,
+        nullable=False,
+    )
+
+    answers = Column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+
+    status = Column(
+        String(20),
+        nullable=False,
+        default="Generated",
+        server_default=text("'Generated'"),
+    )
+
+    generated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    submitted_at = Column(
+        DateTime,
+        nullable=True,
+    )
+
+
+class TrainingEligibilityApplication(Base):
+    __tablename__ = "training_eligibility_applications"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "eligibility_id",
+            "application_id",
+            name="uq_training_eligibility_application"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    eligibility_id = Column(
+        Integer,
+        ForeignKey("training_eligibility.id"),
+        nullable=False,
+        index=True
+    )
+
+    application_id = Column(
+        Integer,
+        ForeignKey("applications.application_id"),
+        nullable=False,
+        index=True
     )

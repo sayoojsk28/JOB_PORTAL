@@ -275,6 +275,33 @@ class TrainingEnrollmentResponse(BaseModel):
     enrolled_at: datetime
     completed_at: datetime | None = None
 
+class InterviewAnalysisCreate(BaseModel):
+    enrollment_id: int
+    interview_explanation: str
+
+class InterviewAnalysisResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    student_id: int
+    enrollment_id: int
+    job_role: str
+    course_type: str
+    resume_skills: list[str]
+    interview_explanation: str
+    created_at: datetime
+
+class InterviewAnalysisReportResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    analysis_id: int
+    heading: str
+    description: str
+    report_type: str
+    pdf_path: str
+    created_at: datetime
+
 class TrainingResumeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
