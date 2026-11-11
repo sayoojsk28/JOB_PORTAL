@@ -34,6 +34,12 @@ const dashboardCards = [
     path:'/student/my-profile'
   },
   {
+  title: 'View Courses',
+  description: 'Access your assigned AI training courses and track your learning progress.',
+  icon: '📚',
+  path: '/student/training-courses',
+},
+  {
   title: 'Reset Password',
   description: 'Change your account password securely.',
   icon: '🔐',

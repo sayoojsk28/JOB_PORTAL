@@ -56,6 +56,8 @@ import StudentChangePassword from '../pages/student/StudentChangePassword';
 import AdminStudentProfile from '../pages/Dashboard/AdminStudentProfile';
 import CourseConfiguration from '../pages/employee/CourseConfiguration';
 import TrainingEligibleStudents from '../pages/employee/TrainingEligibleStudents';
+import StudentTrainingCourses from '../pages/student/StudentTrainingCourses';
+import StudentCourseQuestionnaire from '../pages/student/StudentCourseQuestionnaire';
 
 const AppRoutes = () => {
   return (
@@ -204,6 +206,18 @@ const AppRoutes = () => {
             path="/student/change-password"
             element={<StudentChangePassword />}
           />
+          <Route
+  path="/student/training-courses"
+  element={<StudentTrainingCourses />}
+/>
+<Route
+  path="/student/training-courses/:courseId"
+  element={<StudentCourseQuestionnaire />}
+/>
+<Route
+  path="/student/training-courses/:courseId"
+  element={<StudentCourseQuestionnaire />}
+/>
 
         </Route>
 

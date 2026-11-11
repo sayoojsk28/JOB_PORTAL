@@ -41,6 +41,7 @@ from schemas import (
     TrainingCourseCreate,
     InterviewAnalysisCreate,
 )
+
 import os
 import uuid
 from fastapi import File, Form, UploadFile
@@ -72,7 +73,9 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from xml.sax.saxutils import escape
-from training_generator import generate_part_one
+from training_generator import (
+    generate_course_questionnaire
+)
 os.makedirs("uploads/employee_photos", exist_ok=True)
 
 
@@ -4438,6 +4441,7 @@ def claim_training_eligibility(
     }
 
 
+
 @app.patch("/employee/training-eligibilities/{eligibility_id}/approve")
 def approve_training_eligibility(
     eligibility_id: int,
@@ -4540,26 +4544,30 @@ def approve_training_eligibility(
             role_groups[role_key]["applications"].append(application)
             role_groups[role_key]["resume_texts"].append(resume_text)
 
-        # 4. Generate one course for each unique job role
+        # 4. Generate one course and questionnaire per unique job role
         created_courses = []
 
         for role_data in role_groups.values():
 
             job_role = role_data["job_role"]
+            resume_texts = role_data["resume_texts"]
 
-            # Llama decides Coding / Non-Coding
+            # 4A. Classify course type
             try:
                 course_type = classify_training_course_type(
                     job_role,
-                    role_data["resume_texts"]
+                    resume_texts
                 )
             except Exception as ai_error:
                 raise HTTPException(
                     status_code=502,
-                    detail=f"AI course classification failed for {job_role}: {str(ai_error)}"
+                    detail=(
+                        f"AI course classification failed for "
+                        f"{job_role}: {str(ai_error)}"
+                    )
                 )
 
-            # Create course
+            # 4B. Create course
             course = models.TrainingCourse(
                 eligibility_id=eligibility.id,
                 course_type=course_type,
@@ -4571,7 +4579,7 @@ def approve_training_eligibility(
             db.add(course)
             db.flush()
 
-            # Link this course to its corresponding applications
+            # 4C. Link course to corresponding applications
             for application in role_data["applications"]:
                 db.add(
                     models.TrainingCourseApplication(
@@ -4580,7 +4588,59 @@ def approve_training_eligibility(
                     )
                 )
 
-            # Create separate enrollment for this course
+            # 4D. Generate 20 descriptive interview questions
+            try:
+                questions = generate_course_questionnaire(
+                    job_role=job_role,
+                    course_type=course_type,
+                    resume_texts=resume_texts
+                )
+            except Exception as ai_error:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        f"AI questionnaire generation failed for "
+                        f"{job_role}: {str(ai_error)}"
+                    )
+                )
+
+            # Additional validation before saving
+            if len(questions) != 20:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        f"Questionnaire generation returned an invalid "
+                        f"number of questions for {job_role}"
+                    )
+                )
+
+            # 4E. Create questionnaire record
+            questionnaire = models.TrainingCourseQuestionnaire(
+                course_id=course.id,
+                generation_status="Generating"
+            )
+
+            db.add(questionnaire)
+            db.flush()
+
+            # 4F. Save all 20 questions separately
+            for question_number, question_text in enumerate(
+                questions,
+                start=1
+            ):
+                db.add(
+                    models.TrainingCourseQuestion(
+                        questionnaire_id=questionnaire.id,
+                        question_number=question_number,
+                        question_text=question_text
+                    )
+                )
+
+            # 4G. Mark questionnaire as completed
+            questionnaire.generation_status = "Completed"
+            questionnaire.generated_at = datetime.now()
+
+            # 4H. Create separate enrollment for this course
             enrollment = models.TrainingEnrollment(
                 eligibility_id=eligibility.id,
                 student_id=eligibility.student_id,
@@ -4593,7 +4653,9 @@ def approve_training_eligibility(
             created_courses.append({
                 "course_id": course.id,
                 "job_role": job_role,
-                "course_type": course_type
+                "course_type": course_type,
+                "questionnaire_status": "Completed",
+                "total_questions": len(questions)
             })
 
         # 5. Update eligibility status
@@ -4650,7 +4712,9 @@ def approve_training_eligibility(
         db.refresh(eligibility)
 
         return {
-            "message": "Training courses created successfully",
+            "message": (
+                "Training courses and questionnaires created successfully"
+            ),
             "eligibility_id": eligibility.id,
             "status": eligibility.status,
             "total_courses": len(created_courses),
@@ -4665,8 +4729,12 @@ def approve_training_eligibility(
         db.rollback()
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to approve eligibility and create courses: {str(e)}"
+            detail=(
+                "Failed to approve eligibility and create courses: "
+                f"{str(e)}"
+            )
         )
+
 
 @app.post("/employee/training-eligibilities/{eligibility_id}/course")
 def create_training_course(
@@ -5746,4 +5814,76 @@ def get_student_training_courses(
     return {
         "total_courses": len(result),
         "courses": result
+    }
+
+
+@app.get("/student/training-courses/{course_id}/questionnaire")
+def get_student_course_questionnaire(
+    course_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    # Verify that this course belongs to the logged-in student
+    enrollment = (
+        db.query(models.TrainingEnrollment)
+        .filter(
+            models.TrainingEnrollment.course_id == course_id,
+            models.TrainingEnrollment.student_id == student.id
+        )
+        .first()
+    )
+
+    if not enrollment:
+        raise HTTPException(
+            status_code=404,
+            detail="Training course not found."
+        )
+
+    # Fetch questionnaire
+    questionnaire = (
+        db.query(models.TrainingCourseQuestionnaire)
+        .filter(
+            models.TrainingCourseQuestionnaire.course_id == course_id
+        )
+        .first()
+    )
+
+    if not questionnaire:
+        raise HTTPException(
+            status_code=404,
+            detail="Questionnaire not found for this course."
+        )
+
+    if questionnaire.generation_status != "Completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Questionnaire is not ready yet."
+        )
+
+    # Fetch all questions in order
+    questions = (
+        db.query(models.TrainingCourseQuestion)
+        .filter(
+            models.TrainingCourseQuestion.questionnaire_id
+            == questionnaire.id
+        )
+        .order_by(
+            models.TrainingCourseQuestion.question_number.asc()
+        )
+        .all()
+    )
+
+    return {
+        "course_id": course_id,
+        "questionnaire_id": questionnaire.id,
+        "generation_status": questionnaire.generation_status,
+        "total_questions": len(questions),
+        "questions": [
+            {
+                "id": question.id,
+                "question_number": question.question_number,
+                "question_text": question.question_text
+            }
+            for question in questions
+        ]
     }

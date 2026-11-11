@@ -1075,3 +1075,61 @@ class TrainingEligibilityApplication(Base):
         nullable=False,
         index=True
     )
+
+
+class TrainingCourseQuestionnaire(Base):
+    __tablename__ = "training_course_questionnaires"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "course_id",
+            name="uq_training_course_questionnaire_course"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    course_id = Column(
+        Integer,
+        ForeignKey("training_courses.id"),
+        nullable=False,
+        index=True
+    )
+
+    generation_status = Column(
+        String(20),
+        nullable=False,
+        default="Pending",
+        server_default=text("'Pending'")
+    )
+
+    generated_at = Column(
+        DateTime,
+        nullable=True
+    )
+
+
+class TrainingCourseQuestion(Base):
+    __tablename__ = "training_course_questions"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "questionnaire_id",
+            "question_number",
+            name="uq_course_question_number"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    questionnaire_id = Column(
+        Integer,
+        ForeignKey("training_course_questionnaires.id"),
+        nullable=False,
+        index=True
+    )
+
+    question_number = Column(Integer, nullable=False)
+
+    question_text = Column(Text, nullable=False)
+
