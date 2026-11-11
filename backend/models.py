@@ -430,6 +430,11 @@ class EmployeeNotification(Base):
             "training_eligibility_id",
             name="uq_employee_training_notification"
         ),
+        UniqueConstraint(
+    "employee_id",
+    "training_course_id",
+    name="uq_employee_training_course_notification"
+)
     )
 
     notification_id = Column(Integer, primary_key=True, index=True)
@@ -441,6 +446,12 @@ class EmployeeNotification(Base):
     training_eligibility_id = Column(
     Integer,
     ForeignKey("training_eligibility.id"),
+    nullable=True,
+    index=True
+)
+    training_course_id = Column(
+    Integer,
+    ForeignKey("training_courses.id"),
     nullable=True,
     index=True
 )
@@ -1132,4 +1143,46 @@ class TrainingCourseQuestion(Base):
     question_number = Column(Integer, nullable=False)
 
     question_text = Column(Text, nullable=False)
+
+
+class TrainingCourseSubmission(Base):
+    __tablename__ = "training_course_submissions"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "enrollment_id",
+            name="uq_training_course_submission_enrollment"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    enrollment_id = Column(
+        Integer,
+        ForeignKey("training_enrollments.id"),
+        nullable=False,
+        index=True
+    )
+
+    answers = Column(JSON, nullable=False)
+
+    analysis_result = Column(JSON, nullable=False)
+
+    pdf_path = Column(String(500), nullable=False)
+
+    status = Column(
+        String(20),
+        nullable=False,
+        default="Generated",
+        server_default=text("'Generated'")
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now()
+    )
+
+    generated_at = Column(DateTime, nullable=True)
+
 

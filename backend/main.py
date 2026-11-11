@@ -74,12 +74,25 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 from xml.sax.saxutils import escape
 from training_generator import (
-    generate_course_questionnaire
+    generate_course_questionnaire,
+       analyze_training_questionnaire_with_ai,
+    generate_training_submission_pdf
 )
 os.makedirs("uploads/employee_photos", exist_ok=True)
 
 
 load_dotenv()
+class TrainingCourseAnswer(BaseModel):
+    question_id: int
+    answer: str
+
+
+class TrainingCourseSubmissionRequest(BaseModel):
+    answers: list[TrainingCourseAnswer] = Field(
+        ...,
+        min_length=20,
+        max_length=20
+    )
 app = FastAPI(title="Job Portal API")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -5206,7 +5219,10 @@ def get_student_training_courses(
         .filter(
             models.TrainingEnrollment.student_id == student.id,
             models.TrainingEligibility.status == "Approved",
+            models.TrainingCourse.status == "Active",
+            models.TrainingEnrollment.status != "Completed"
         )
+        
         .order_by(
             models.TrainingEnrollment.enrolled_at.desc()
         )
@@ -5887,3 +5903,448 @@ def get_student_course_questionnaire(
             for question in questions
         ]
     }
+
+
+@app.post("/student/training-courses/{course_id}/generate-pdf")
+def generate_student_training_pdf(
+    course_id: int,
+    request: TrainingCourseSubmissionRequest,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    pdf_path = None
+
+    try:
+        # 1. Verify student's active enrollment
+        enrollment = (
+            db.query(models.TrainingEnrollment)
+            .join(
+                models.TrainingEligibility,
+                models.TrainingEligibility.id
+                == models.TrainingEnrollment.eligibility_id
+            )
+            .filter(
+                models.TrainingEnrollment.course_id == course_id,
+                models.TrainingEnrollment.student_id == student.id,
+                models.TrainingEnrollment.status == "Active",
+                models.TrainingEligibility.status == "Approved"
+            )
+            .first()
+        )
+
+        if not enrollment:
+            raise HTTPException(
+                status_code=404,
+                detail="Active training enrollment not found."
+            )
+
+        # 2. Prevent duplicate submission
+        existing_submission = (
+            db.query(models.TrainingCourseSubmission)
+            .filter(
+                models.TrainingCourseSubmission.enrollment_id
+                == enrollment.id
+            )
+            .first()
+        )
+
+        if existing_submission:
+            raise HTTPException(
+                status_code=409,
+                detail="Questionnaire has already been submitted."
+            )
+
+        # 3. Get course details
+        course = (
+            db.query(models.TrainingCourse)
+            .filter(models.TrainingCourse.id == course_id)
+            .first()
+        )
+
+        if not course:
+            raise HTTPException(
+                status_code=404,
+                detail="Training course not found."
+            )
+
+        # 4. Get completed questionnaire
+        questionnaire = (
+            db.query(models.TrainingCourseQuestionnaire)
+            .filter(
+                models.TrainingCourseQuestionnaire.course_id == course_id,
+                models.TrainingCourseQuestionnaire.generation_status
+                == "Completed"
+            )
+            .first()
+        )
+
+        if not questionnaire:
+            raise HTTPException(
+                status_code=409,
+                detail="Questionnaire is not ready."
+            )
+
+        questions = (
+            db.query(models.TrainingCourseQuestion)
+            .filter(
+                models.TrainingCourseQuestion.questionnaire_id
+                == questionnaire.id
+            )
+            .order_by(
+                models.TrainingCourseQuestion.question_number.asc()
+            )
+            .all()
+        )
+
+        if len(questions) != 20:
+            raise HTTPException(
+                status_code=409,
+                detail="The questionnaire must contain exactly 20 questions."
+            )
+
+        # 5. Validate submitted answers
+        if len(request.answers) != 20:
+            raise HTTPException(
+                status_code=400,
+                detail="Exactly 20 answers are required."
+            )
+
+        answer_map = {}
+
+        for item in request.answers:
+
+            if item.question_id in answer_map:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Duplicate question answer detected."
+                )
+
+            if not item.answer.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="All 20 questions must be answered."
+                )
+
+            answer_map[item.question_id] = item.answer.strip()
+
+        question_ids = {question.id for question in questions}
+
+        if set(answer_map.keys()) != question_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="Submitted answers do not match this questionnaire."
+            )
+
+        # 6. Prepare question-answer pairs
+        question_answers = []
+
+        for question in questions:
+            question_answers.append({
+                "question_id": question.id,
+                "question_number": question.question_number,
+                "question_text": question.question_text,
+                "answer": answer_map[question.id]
+            })
+
+        # 7. Retrieve resumes linked to this course
+        resumes = (
+            db.query(models.Resume)
+            .join(
+                models.Application,
+                models.Application.resume_id
+                == models.Resume.resume_id
+            )
+            .join(
+                models.TrainingCourseApplication,
+                models.TrainingCourseApplication.application_id
+                == models.Application.application_id
+            )
+            .filter(
+                models.TrainingCourseApplication.course_id == course_id,
+                models.Application.student_id == student.id,
+                models.Resume.student_id == student.id
+            )
+            .all()
+        )
+
+        if not resumes:
+            raise HTTPException(
+                status_code=409,
+                detail="No resumes are linked to this training course."
+            )
+
+        # 8. Extract relevant resume text
+        resume_texts = []
+        processed_resume_ids = set()
+
+        for resume in resumes:
+
+            if resume.resume_id in processed_resume_ids:
+                continue
+
+            processed_resume_ids.add(resume.resume_id)
+
+            if resume.extracted_text and resume.extracted_text.strip():
+                resume_text = resume.extracted_text.strip()
+            else:
+                resume_text = extract_resume_text(resume.file_path)
+
+            if resume_text.strip():
+                resume_texts.append(resume_text)
+
+        if not resume_texts:
+            raise HTTPException(
+                status_code=409,
+                detail="No readable resume information is available."
+            )
+
+        # 9. Generate AI analysis
+        try:
+            analysis_text = analyze_training_questionnaire_with_ai(
+                job_role=course.job_role,
+                course_type=course.course_type,
+                question_answers=question_answers,
+                resume_texts=resume_texts
+            )
+
+        except Exception as ai_error:
+            raise HTTPException(
+                status_code=502,
+                detail=f"AI questionnaire analysis failed: {str(ai_error)}"
+            )
+
+        # 10. Generate PDF
+        try:
+            pdf_path = generate_training_submission_pdf(
+                job_role=course.job_role,
+                question_answers=question_answers,
+                analysis_text=analysis_text
+            )
+
+            if not os.path.isfile(pdf_path):
+                raise FileNotFoundError(
+                    "Generated PDF file was not found."
+                )
+
+        except Exception as pdf_error:
+            raise HTTPException(
+                status_code=500,
+                detail=f"PDF generation failed: {str(pdf_error)}"
+            )
+
+        # 11. Save submission
+        submission = models.TrainingCourseSubmission(
+            enrollment_id=enrollment.id,
+            answers=question_answers,
+            analysis_result={
+                "report_text": analysis_text
+            },
+            pdf_path=pdf_path,
+            status="Generated",
+            generated_at=datetime.now()
+        )
+
+        db.add(submission)
+        db.commit()
+        db.refresh(submission)
+
+        return {
+            "message": "Questionnaire submitted and PDF generated successfully.",
+            "submission_id": submission.id,
+            "course_id": course.id,
+            "enrollment_id": enrollment.id,
+            "status": submission.status,
+            "pdf_url": (
+                f"/student/training-course-submissions/"
+                f"{submission.id}/pdf"
+            )
+        }
+
+    except HTTPException:
+        db.rollback()
+
+        if pdf_path and os.path.isfile(pdf_path):
+            os.remove(pdf_path)
+
+        raise
+
+    except Exception as e:
+        db.rollback()
+
+        if pdf_path and os.path.isfile(pdf_path):
+            os.remove(pdf_path)
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate training submission: {str(e)}"
+        )
+
+@app.get("/student/training-course-submissions/{submission_id}/pdf")
+def get_training_submission_pdf(
+    submission_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    submission = (
+        db.query(models.TrainingCourseSubmission)
+        .join(
+            models.TrainingEnrollment,
+            models.TrainingEnrollment.id
+            == models.TrainingCourseSubmission.enrollment_id
+        )
+        .filter(
+            models.TrainingCourseSubmission.id == submission_id,
+            models.TrainingEnrollment.student_id == student.id
+        )
+        .first()
+    )
+
+    if not submission:
+        raise HTTPException(
+            status_code=404,
+            detail="Training submission not found."
+        )
+
+    if not submission.pdf_path or not os.path.isfile(submission.pdf_path):
+        raise HTTPException(
+            status_code=404,
+            detail="PDF file not found."
+        )
+
+    return FileResponse(
+        path=submission.pdf_path,
+        media_type="application/pdf",
+        filename="Training_Questionnaire_Report.pdf",
+        content_disposition_type="inline"
+    )
+
+@app.post("/student/training-courses/{course_id}/complete")
+def complete_student_training_course(
+    course_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    enrollment = (
+        db.query(models.TrainingEnrollment)
+        .join(
+            models.TrainingCourse,
+            models.TrainingCourse.id
+            == models.TrainingEnrollment.course_id
+        )
+        .join(
+            models.TrainingEligibility,
+            models.TrainingEligibility.id
+            == models.TrainingEnrollment.eligibility_id
+        )
+        .filter(
+            models.TrainingEnrollment.course_id == course_id,
+            models.TrainingEnrollment.student_id == student.id,
+            models.TrainingCourse.status == "Active",
+            models.TrainingEligibility.status == "Approved",
+        )
+        .first()
+    )
+
+    if not enrollment:
+        raise HTTPException(
+            status_code=404,
+            detail="Training course not found."
+        )
+
+    if enrollment.status == "Completed":
+        return {
+            "message": "Course already completed.",
+            "status": "Completed"
+        }
+
+    if enrollment.status != "Active":
+        raise HTTPException(
+            status_code=400,
+            detail="This enrollment is not active."
+        )
+
+    submission = (
+        db.query(models.TrainingCourseSubmission)
+        .filter(
+            models.TrainingCourseSubmission.enrollment_id
+            == enrollment.id,
+            models.TrainingCourseSubmission.status == "Generated"
+        )
+        .first()
+    )
+
+    if not submission:
+        raise HTTPException(
+            status_code=400,
+            detail="Please generate your course PDF before completing the course."
+        )
+
+    course = (
+        db.query(models.TrainingCourse)
+        .filter(models.TrainingCourse.id == course_id)
+        .first()
+    )
+
+    enrollment.status = "Completed"
+    enrollment.completed_at = func.now()
+
+    notification = models.EmployeeNotification(
+        employee_id=course.created_by,
+        training_eligibility_id=None,
+        training_course_id=course.id,
+        message=f"A student has completed the training course for {course.job_role}."
+    )
+
+    db.add(notification)
+    db.commit()
+
+    return {
+        "message": "Training course completed successfully.",
+        "course_id": course.id,
+        "enrollment_id": enrollment.id,
+        "status": "Completed"
+    }
+
+
+@app.get("/student/training-courses/{course_id}/submission")
+def get_student_training_course_submission(
+    course_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    enrollment = (
+        db.query(models.TrainingEnrollment)
+        .filter(
+            models.TrainingEnrollment.course_id == course_id,
+            models.TrainingEnrollment.student_id == student.id
+        )
+        .first()
+    )
+
+    if not enrollment:
+        raise HTTPException(
+            status_code=404,
+            detail="Training course not found."
+        )
+
+    submission = (
+        db.query(models.TrainingCourseSubmission)
+        .filter(
+            models.TrainingCourseSubmission.enrollment_id == enrollment.id,
+            models.TrainingCourseSubmission.status == "Generated"
+        )
+        .first()
+    )
+
+    if not submission:
+        return {
+            "exists": False
+        }
+
+    return {
+        "exists": True,
+        "submission_id": submission.id,
+        "status": submission.status,
+        "pdf_url": f"/student/training-course-submissions/{submission.id}/pdf"
+    }
+
