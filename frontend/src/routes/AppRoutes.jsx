@@ -20,6 +20,7 @@ import ViewStudents from '../pages/Dashboard/ViewStudents';
 import SendAnnouncements from '../pages/Dashboard/SendAnnouncements';
 import AdminStudentFeedback from '../pages/Dashboard/AdminStudentFeedback';
 import AdminFeedbackDetails from '../pages/Dashboard/AdminFeedbackDetails';
+import AdminStudentProfile from '../pages/Dashboard/AdminStudentProfile';
 
 import StudentDashboard from '../pages/student/StudentDashboard';
 import StudentRegistrationSuccess from '../pages/student/StudentRegistrationSuccess';
@@ -29,6 +30,13 @@ import UploadResume from '../pages/student/UploadResume';
 import ViewConfirmedInterview from '../pages/student/ViewConfirmedInterview';
 import ViewInterviewResults from '../pages/student/ViewInterviewResults';
 import StudentFeedback from '../pages/Student/StudentFeedback';
+import StudentMyProfile from '../pages/student/StudentMyProfile';
+import ViewAnnouncements from '../pages/student/ViewAnnouncements';
+import AppliedJobsHistory from '../pages/student/AppliedJobsHistory';
+import StudentChangePassword from '../pages/student/StudentChangePassword';
+import StudentEditProfile from '../pages/student/StudentEditProfile';
+import StudentTrainingCourses from '../pages/student/StudentTrainingCourses';
+import StudentCourseQuestionnaire from '../pages/student/StudentCourseQuestionnaire';
 
 import PostCompanies from '../pages/employee/PostCompanies';
 import ViewCompanies from '../pages/employee/ViewCompanies';
@@ -48,16 +56,9 @@ import PendingStudents from '../pages/employee/PendingStudents';
 import EmployeeViewStudents from '../pages/employee/ViewStudents';
 import StudentStatus from '../pages/employee/StudentStatus';
 import StudentProfile from '../pages/employee/StudentProfile';
-
-import StudentMyProfile from '../pages/student/StudentMyProfile';
-import ViewAnnouncements from '../pages/student/ViewAnnouncements';
-import AppliedJobsHistory from '../pages/student/AppliedJobsHistory';
-import StudentChangePassword from '../pages/student/StudentChangePassword';
-import AdminStudentProfile from '../pages/Dashboard/AdminStudentProfile';
 import CourseConfiguration from '../pages/employee/CourseConfiguration';
 import TrainingEligibleStudents from '../pages/employee/TrainingEligibleStudents';
-import StudentTrainingCourses from '../pages/student/StudentTrainingCourses';
-import StudentCourseQuestionnaire from '../pages/student/StudentCourseQuestionnaire';
+import EmployeeEditDetails from '../pages/employee/EmployeeEditDetails';
 
 const AppRoutes = () => {
   return (
@@ -84,7 +85,11 @@ const AppRoutes = () => {
 
         {/* Common Protected Routes */}
 
-        <Route element={<ProtectedRoute allowedRoles={['student', 'employee']} />}>
+        <Route
+          element={
+            <ProtectedRoute allowedRoles={['student', 'employee']} />
+          }
+        >
           <Route path="/profile" element={<Profile />} />
         </Route>
 
@@ -93,7 +98,10 @@ const AppRoutes = () => {
 
         <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
 
-          <Route path="/admin/dashboard" element={<AdminDashboard />} />
+          <Route
+            path="/admin/dashboard"
+            element={<AdminDashboard />}
+          />
 
           <Route
             path="/admin/employees/pending"
@@ -141,9 +149,9 @@ const AppRoutes = () => {
           />
 
           <Route
-  path="/admin/students/:studentId"
-  element={<AdminStudentProfile />}
-/>
+            path="/admin/students/:studentId"
+            element={<AdminStudentProfile />}
+          />
 
         </Route>
 
@@ -193,6 +201,11 @@ const AppRoutes = () => {
           />
 
           <Route
+            path="/student/edit-profile"
+            element={<StudentEditProfile />}
+          />
+
+          <Route
             path="/student/announcements"
             element={<ViewAnnouncements />}
           />
@@ -206,18 +219,16 @@ const AppRoutes = () => {
             path="/student/change-password"
             element={<StudentChangePassword />}
           />
+
           <Route
-  path="/student/training-courses"
-  element={<StudentTrainingCourses />}
-/>
-<Route
-  path="/student/training-courses/:courseId"
-  element={<StudentCourseQuestionnaire />}
-/>
-<Route
-  path="/student/training-courses/:courseId"
-  element={<StudentCourseQuestionnaire />}
-/>
+            path="/student/training-courses"
+            element={<StudentTrainingCourses />}
+          />
+
+          <Route
+            path="/student/training-courses/:courseId"
+            element={<StudentCourseQuestionnaire />}
+          />
 
         </Route>
 
@@ -232,13 +243,24 @@ const AppRoutes = () => {
           />
 
           <Route
+            path="/employee/edit-details"
+            element={<EmployeeEditDetails />}
+          />
+
+          <Route
             path="/employee/pending-students"
             element={<PendingStudents />}
           />
+
           <Route
-  path="/employee/training-eligibilities/:eligibilityId/course"
-  element={<CourseConfiguration />}
-/>
+            path="/employee/training-eligibilities/:eligibilityId/course"
+            element={<CourseConfiguration />}
+          />
+
+          <Route
+            path="/employee/training-eligibilities"
+            element={<TrainingEligibleStudents />}
+          />
 
           <Route
             path="/employee/change-password"
@@ -256,84 +278,85 @@ const AppRoutes = () => {
           />
 
           <Route
-  path="/employee/training-eligibilities"
-  element={<TrainingEligibleStudents />}
+            path="/employee/companies/create"
+            element={<PostCompanies />}
+          />
+
+          <Route
+            path="/employee/companies"
+            element={<ViewCompanies />}
+          />
+
+          <Route
+            path="/employee/companies/:companyId/edit"
+            element={<PostCompanies />}
+          />
+
+          <Route
+            path="/employee/companies/:companyId/vacancies/create"
+            element={<PostVacancies />}
+          />
+
+          <Route
+            path="/employee/vacancies"
+            element={<ViewVacancies />}
+          />
+
+          <Route
+  path="/employee/vacancies/:vacancyId/edit"
+  element={<PostVacancies />}
 />
 
-        </Route>
+          <Route
+            path="/employee/applications"
+            element={<ViewApplication />}
+          />
 
+          <Route
+            path="/employee/post-interview"
+            element={<PostInterview />}
+          />
 
-        {/* Employee Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['employee']} />}>
-        <Route
-          path="/employee/companies/create"
-          element={<PostCompanies />}
-        />
+          <Route
+            path="/employee/interviews"
+            element={<ViewInterview />}
+          />
 
-        <Route
-          path="/employee/companies"
-          element={<ViewCompanies />}
-        />
+          <Route
+            path="/employee/post-result"
+            element={<PostResult />}
+          />
 
-        <Route
-          path="/employee/companies/:companyId/vacancies/create"
-          element={<PostVacancies />}
-        />
+          <Route
+            path="/employee/interview-results"
+            element={<PublishResult />}
+          />
 
-        <Route
-          path="/employee/vacancies"
-          element={<ViewVacancies />}
-        />
+          <Route
+            path="/employee/accepted-companies"
+            element={<ViewAcceptedCompanies />}
+          />
 
-        <Route
-          path="/employee/applications"
-          element={<ViewApplication />}
-        />
+          <Route
+            path="/employee/audit-logs"
+            element={<AuditLogs />}
+          />
 
-        <Route
-          path="/employee/post-interview"
-          element={<PostInterview />}
-        />
+          <Route
+            path="/employee/students"
+            element={<EmployeeViewStudents />}
+          />
 
-        <Route
-          path="/employee/interviews"
-          element={<ViewInterview />}
-        />
+          <Route
+            path="/employee/students/status-history"
+            element={<StudentStatus />}
+          />
 
-        <Route
-          path="/employee/post-result"
-          element={<PostResult />}
-        />
+          <Route
+            path="/employee/students/:studentId"
+            element={<StudentProfile />}
+          />
 
-        <Route
-          path="/employee/interview-results"
-          element={<PublishResult />}
-        />
-
-        <Route
-          path="/employee/accepted-companies"
-          element={<ViewAcceptedCompanies />}
-        />
-
-        <Route
-          path="/employee/audit-logs"
-          element={<AuditLogs />}
-        />
-
-        <Route
-          path="/employee/students"
-          element={<EmployeeViewStudents />}
-        />
-
-        <Route
-          path="/employee/students/status-history"
-          element={<StudentStatus />}
-        />
-
-        <Route
-          path="/employee/students/:studentId"
-          element={<StudentProfile />}
-        />
         </Route>
 
       </Routes>

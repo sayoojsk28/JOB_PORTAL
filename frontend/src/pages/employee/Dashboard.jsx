@@ -64,6 +64,12 @@ const dashboardCards = [
     path: '/employee/interview-results',
   },
   {
+  title: 'Edit Details',
+  description: 'View and update your employee account details.',
+  icon: '✏️',
+  path: '/employee/edit-details',
+},
+  {
   title: 'Reset Password',
   description: 'Change your account password securely.',
   icon: '🔐',

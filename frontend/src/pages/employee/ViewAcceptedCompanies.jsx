@@ -102,6 +102,14 @@ function ViewAcceptedCompanies() {
 >
   Post Vacancy
 </button>
+<button
+  onClick={() =>
+    navigate(`/employee/companies/${company.id}/edit`)
+  }
+  className="mt-3 w-full rounded-lg bg-amber-600 px-4 py-2 font-medium text-white hover:bg-amber-700"
+>
+  Edit Details
+</button>
               </div>
               
             ))}

@@ -40,6 +40,7 @@ from schemas import (
     EmployeeAnnouncementCreate,
     TrainingCourseCreate,
     InterviewAnalysisCreate,
+    VacancyUpdate,
 )
 
 import os
@@ -2692,6 +2693,188 @@ def get_active_employees(
         for employee in employees
     ]
 
+@app.get("/employee/my-details")
+def get_my_employee_details(
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    return {
+        "id": employee.id,
+        "full_name": employee.full_name,
+        "email": employee.email,
+        "phone": employee.phone,
+        "designation": employee.designation,
+        "profile_photo": (
+            f"/{employee.profile_photo}"
+            if employee.profile_photo
+            else None
+        ),
+    }
+
+
+@app.put("/employee/my-details")
+def update_my_employee_details(
+    full_name: str = Form(..., min_length=2, max_length=100),
+    email: EmailStr = Form(...),
+    phone: str = Form(..., min_length=7, max_length=20),
+    designation: str = Form(..., min_length=2, max_length=100),
+    profile_photo: UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    # Find the linked User account
+    user = db.query(models.User).filter(
+        models.User.user_id == employee.user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="Employee user account not found",
+        )
+
+    # Check whether another user already uses this email
+    existing_user = db.query(models.User).filter(
+        models.User.email == email,
+        models.User.user_id != employee.user_id,
+    ).first()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=409,
+            detail="Email is already registered",
+        )
+
+    # Check whether another employee already uses this email
+    existing_employee = db.query(models.Employee).filter(
+        models.Employee.email == email,
+        models.Employee.id != employee.id,
+    ).first()
+
+    if existing_employee:
+        raise HTTPException(
+            status_code=409,
+            detail="Email is already registered",
+        )
+
+    new_photo_path = None
+    old_photo_path = employee.profile_photo
+
+    # Process new profile photo only when provided
+    if profile_photo and profile_photo.filename:
+        allowed_types = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp",
+        }
+
+        try:
+            if profile_photo.content_type not in allowed_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Only JPG, PNG, and WEBP images are allowed",
+                )
+
+            photo_data = profile_photo.file.read()
+
+            if len(photo_data) > 5 * 1024 * 1024:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Profile photo must not exceed 5 MB",
+                )
+
+            if not photo_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Uploaded profile photo is empty",
+                )
+
+        finally:
+            profile_photo.file.close()
+
+        os.makedirs("uploads/employee_photos", exist_ok=True)
+
+        extension = allowed_types[profile_photo.content_type]
+        filename = f"{uuid.uuid4().hex}{extension}"
+        new_photo_path = f"uploads/employee_photos/{filename}"
+
+        try:
+            with open(new_photo_path, "wb") as image_file:
+                image_file.write(photo_data)
+        except Exception:
+            if os.path.exists(new_photo_path):
+                os.remove(new_photo_path)
+            raise
+
+    try:
+        # Update Employee table
+        employee.full_name = full_name
+        employee.email = email
+        employee.phone = phone
+        employee.designation = designation
+
+        if new_photo_path:
+            employee.profile_photo = new_photo_path
+
+        # Update linked User table
+        user.name = full_name
+        user.email = email
+
+        log_action(
+            db=db,
+            user_id=employee.user_id,
+            action="EMPLOYEE_DETAILS_UPDATED",
+            target_type="employee",
+            target_id=employee.id,
+            details="Employee updated their account details.",
+        )
+
+        db.commit()
+        db.refresh(employee)
+
+    except IntegrityError:
+        db.rollback()
+
+        if new_photo_path and os.path.exists(new_photo_path):
+            os.remove(new_photo_path)
+
+        raise HTTPException(
+            status_code=409,
+            detail="Email is already registered",
+        )
+
+    except Exception:
+        db.rollback()
+
+        if new_photo_path and os.path.exists(new_photo_path):
+            os.remove(new_photo_path)
+
+        raise
+
+    # Delete old photo only after successful database commit
+    if (
+        new_photo_path
+        and old_photo_path
+        and old_photo_path != new_photo_path
+        and os.path.exists(old_photo_path)
+    ):
+        os.remove(old_photo_path)
+
+    return {
+        "message": "Employee details updated successfully",
+        "employee": {
+            "id": employee.id,
+            "full_name": employee.full_name,
+            "email": employee.email,
+            "phone": employee.phone,
+            "designation": employee.designation,
+            "profile_photo": (
+                f"/{employee.profile_photo}"
+                if employee.profile_photo
+                else None
+            ),
+        },
+    }
 
 
 @app.patch("/admin/employees/{employee_id}/status")
@@ -3028,6 +3211,142 @@ def create_company(
 
     return new_company
 
+@app.put("/companies/{company_id}", response_model=CompanyResponse)
+def update_company(
+    company_id: int,
+    name: str = Form(...),
+    industry: str = Form(...),
+    address: str = Form(...),
+    contact_number: str = Form(...),
+    email: EmailStr = Form(...),
+    website: str | None = Form(None),
+    size: str | None = Form(None),
+    description: str | None = Form(None),
+    logo: UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not isinstance(current_user, models.Employee):
+        raise HTTPException(
+            status_code=403,
+            detail="Only employees can edit companies",
+        )
+
+    company = db.query(models.Company).filter(
+        models.Company.id == company_id
+    ).first()
+
+    if not company:
+        raise HTTPException(
+            status_code=404,
+            detail="Company not found",
+        )
+
+    new_logo_path = None
+    old_logo_path = company.logo
+
+    if logo and logo.filename:
+        allowed_types = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp",
+        }
+
+        extension = allowed_types.get(logo.content_type)
+
+        if not extension:
+            logo.file.close()
+            raise HTTPException(
+                status_code=400,
+                detail="Only JPG, PNG and WEBP images are allowed",
+            )
+
+        logo_data = logo.file.read()
+        logo.file.close()
+
+        if not logo_data:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded logo is empty",
+            )
+
+        if len(logo_data) > 5 * 1024 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail="Logo size must be 5 MB or less",
+            )
+
+        filename = f"{uuid.uuid4().hex}{extension}"
+        file_path = os.path.join(COMPANY_LOGOS_DIR, filename)
+
+        try:
+            with open(file_path, "wb") as file:
+                file.write(logo_data)
+
+            new_logo_path = f"/uploads/company_logos/{filename}"
+
+        except Exception:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+            raise HTTPException(
+                status_code=500,
+                detail="Could not upload company logo",
+            )
+
+    try:
+        company.name = name
+        company.industry = industry
+        company.address = address
+        company.contact_number = contact_number
+        company.email = str(email)
+        company.website = website
+        company.size = size
+        company.description = description
+
+        if new_logo_path:
+            company.logo = new_logo_path
+
+        log_action(
+            db=db,
+            user_id=current_user.user_id,
+            action="COMPANY_UPDATED",
+            target_type="company",
+            target_id=company.id,
+            details=f"Company details updated: {company.name}",
+        )
+
+        db.commit()
+        db.refresh(company)
+
+    except Exception:
+        db.rollback()
+
+        if new_logo_path:
+            saved_file = os.path.join(
+                COMPANY_LOGOS_DIR,
+                os.path.basename(new_logo_path),
+            )
+            if os.path.exists(saved_file):
+                os.remove(saved_file)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Could not update company details",
+        )
+
+    # Delete the previous logo only after successful database commit.
+    if new_logo_path and old_logo_path:
+        old_file = os.path.join(
+            COMPANY_LOGOS_DIR,
+            os.path.basename(old_logo_path),
+        )
+
+        if os.path.exists(old_file):
+            os.remove(old_file)
+
+    return company
+
 @app.get("/companies", response_model=list[CompanyResponse])
 def get_companies(
     db: Session = Depends(get_db),
@@ -3178,6 +3497,56 @@ def get_vacancies(
     )
 
     return vacancies
+
+@app.put(
+    "/vacancies/{vacancy_id}",
+    response_model=VacancyResponse,
+)
+def update_vacancy(
+    vacancy_id: int,
+    vacancy_data: VacancyUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    # Only employees can edit vacancies
+    if not isinstance(current_user, models.Employee):
+        raise HTTPException(
+            status_code=403,
+            detail="Only employees can edit vacancies",
+        )
+
+    # Find the vacancy
+    vacancy = (
+        db.query(models.Vacancy)
+        .filter(models.Vacancy.id == vacancy_id)
+        .first()
+    )
+
+    if not vacancy:
+        raise HTTPException(
+            status_code=404,
+            detail="Vacancy not found",
+        )
+
+    # Update vacancy details
+    update_data = vacancy_data.model_dump()
+
+    for field, value in update_data.items():
+        setattr(vacancy, field, value)
+
+    log_action(
+        db=db,
+        user_id=current_user.user_id,
+        action="VACANCY_UPDATED",
+        target_type="vacancy",
+        target_id=vacancy.id,
+        details=f"Vacancy updated: {vacancy.title}",
+    )
+
+    db.commit()
+    db.refresh(vacancy)
+
+    return vacancy
 
 
 @app.get("/student/vacancies", response_model=list[VacancyResponse])
@@ -5274,6 +5643,7 @@ def get_student_profile(
         "status": student.status,
     }
 
+
 @app.get("/student/my-profile")
 def get_my_student_profile(
     current_user=Depends(require_student),
@@ -5281,10 +5651,207 @@ def get_my_student_profile(
     return {
         "id": current_user.id,
         "full_name": current_user.full_name,
+        "email": current_user.email,
+        "phone": current_user.phone,
+        "date_of_birth": current_user.date_of_birth,
+        "gender": current_user.gender,
+        "address": current_user.address,
+        "qualification": current_user.qualification,
+        "department": current_user.department,
+        "year_of_passing": current_user.year_of_passing,
+        "skills": current_user.skills,
         "profile_photo": current_user.profile_photo,
         "is_placed": current_user.is_placed,
     }
 
+
+@app.put("/student/my-profile")
+async def update_my_student_profile(
+    full_name: str = Form(..., min_length=2, max_length=100),
+    email: EmailStr = Form(...),
+    phone: str = Form(..., min_length=7, max_length=20),
+    date_of_birth: date = Form(...),
+    gender: str = Form(..., min_length=1, max_length=20),
+    address: str = Form(..., min_length=5, max_length=500),
+    qualification: str = Form(..., min_length=2, max_length=100),
+    department: str = Form(..., min_length=2, max_length=100),
+    year_of_passing: int = Form(..., ge=1950, le=2100),
+    skills: str = Form(..., min_length=1, max_length=1000),
+    profile_photo: UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+    student=Depends(require_student),
+):
+    # Find linked User account
+    user = db.query(models.User).filter(
+        models.User.user_id == student.user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="Student user account not found",
+        )
+
+    # Check email uniqueness in User table
+    existing_user = db.query(models.User).filter(
+        models.User.email == email,
+        models.User.user_id != student.user_id,
+    ).first()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=409,
+            detail="Email is already registered",
+        )
+
+    # Check email uniqueness in Student table
+    existing_student = db.query(models.Student).filter(
+        models.Student.email == email,
+        models.Student.id != student.id,
+    ).first()
+
+    if existing_student:
+        raise HTTPException(
+            status_code=409,
+            detail="Email is already registered",
+        )
+
+    new_photo_path = None
+    new_photo_relative_path = None
+    old_photo_path = student.profile_photo
+
+    # Process new profile photo if provided
+    if profile_photo and profile_photo.filename:
+        allowed_types = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+        }
+
+        try:
+            if profile_photo.content_type not in allowed_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Only JPG and PNG images are allowed",
+                )
+
+            photo_data = await profile_photo.read()
+
+            if len(photo_data) > 5 * 1024 * 1024:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Profile photo must be smaller than 5 MB",
+                )
+
+            if not photo_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Uploaded profile photo is empty",
+                )
+
+        finally:
+            await profile_photo.close()
+
+        upload_dir = (
+            Path(__file__).resolve().parent
+            / "uploads"
+            / "student_profiles"
+        )
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
+        extension = allowed_types[profile_photo.content_type]
+        filename = f"{uuid.uuid4().hex}{extension}"
+
+        new_photo_path = upload_dir / filename
+        new_photo_relative_path = (
+            f"uploads/student_profiles/{filename}"
+        )
+
+        try:
+            new_photo_path.write_bytes(photo_data)
+        except Exception:
+            new_photo_path.unlink(missing_ok=True)
+            raise
+
+    try:
+        # Update Student table
+        student.full_name = full_name
+        student.email = email
+        student.phone = phone
+        student.date_of_birth = date_of_birth
+        student.gender = gender
+        student.address = address
+        student.qualification = qualification
+        student.department = department
+        student.year_of_passing = year_of_passing
+        student.skills = skills
+
+        if new_photo_relative_path:
+            student.profile_photo = new_photo_relative_path
+
+        # Update linked User table
+        user.name = full_name
+        user.email = email
+
+        log_action(
+            db=db,
+            user_id=student.user_id,
+            action="STUDENT_DETAILS_UPDATED",
+            target_type="student",
+            target_id=student.id,
+            details="Student updated their profile details.",
+        )
+
+        db.commit()
+        db.refresh(student)
+
+    except IntegrityError:
+        db.rollback()
+
+        if new_photo_path:
+            new_photo_path.unlink(missing_ok=True)
+
+        raise HTTPException(
+            status_code=409,
+            detail="Email is already registered",
+        )
+
+    except Exception:
+        db.rollback()
+
+        if new_photo_path:
+            new_photo_path.unlink(missing_ok=True)
+
+        raise
+
+    # Delete old photo only after successful database commit
+    if (
+        new_photo_path
+        and old_photo_path
+        and old_photo_path != new_photo_relative_path
+    ):
+        old_photo_absolute_path = (
+            Path(__file__).resolve().parent / old_photo_path
+        )
+        old_photo_absolute_path.unlink(missing_ok=True)
+
+    return {
+        "message": "Student profile updated successfully",
+        "student": {
+            "id": student.id,
+            "full_name": student.full_name,
+            "email": student.email,
+            "phone": student.phone,
+            "date_of_birth": student.date_of_birth,
+            "gender": student.gender,
+            "address": student.address,
+            "qualification": student.qualification,
+            "department": student.department,
+            "year_of_passing": student.year_of_passing,
+            "skills": student.skills,
+            "profile_photo": student.profile_photo,
+            "is_placed": student.is_placed,
+        },
+    }
 
 @app.get("/student/announcements")
 def get_student_announcements(

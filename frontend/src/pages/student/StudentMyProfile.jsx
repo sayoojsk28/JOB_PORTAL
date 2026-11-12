@@ -124,14 +124,24 @@ const handlePlacedToggle = async () => {
               </div>
             )}
 
-            <div className="pb-1 text-center sm:pb-2 sm:text-left">
-              <h1 className="text-2xl font-bold text-slate-800">
-                {student.full_name}
-              </h1>
-              <p className="mt-1 text-sm text-slate-500">
-                Student Profile
-              </p>
-            </div>
+            <div className="flex w-full flex-col gap-4 pb-1 sm:flex-row sm:items-end sm:justify-between sm:pb-2">
+  <div className="text-center sm:text-left">
+    <h1 className="text-2xl font-bold text-slate-800">
+      {student.full_name}
+    </h1>
+    <p className="mt-1 text-sm text-slate-500">
+      Student Profile
+    </p>
+  </div>
+
+  <button
+    type="button"
+    onClick={() => navigate('/student/edit-profile')}
+    className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+  >
+    ✏️ Edit Profile
+  </button>
+</div>
           </div>
         </section>
         

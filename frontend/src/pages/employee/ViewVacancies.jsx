@@ -1,8 +1,10 @@
 
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 
 function ViewVacancies() {
+  const navigate = useNavigate();
   const [vacancies, setVacancies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -329,10 +331,19 @@ function ViewVacancies() {
                     </div>
 
                     <div className="mt-5 border-t border-slate-100 pt-4">
-                      <p className="text-xs text-slate-400">
-                        Vacancy ID: {vacancy.id}
-                      </p>
-                    </div>
+  <p className="text-xs text-slate-400">
+    Vacancy ID: {vacancy.id}
+  </p>
+
+  <button
+    onClick={() =>
+      navigate(`/employee/vacancies/${vacancy.id}/edit`)
+    }
+    className="mt-4 w-full rounded-xl bg-amber-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-amber-700"
+  >
+    Edit Details
+  </button>
+</div>
                   </div>
                 </article>
               ))}

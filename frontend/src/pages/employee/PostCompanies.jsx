@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
 
 const initialForm = {
@@ -21,13 +21,57 @@ const labelClass = 'mb-2 block text-sm font-semibold text-slate-700';
 
 const PostCompanies = () => {
   const navigate = useNavigate();
-
+  const { companyId } = useParams();
+  const isEditMode = Boolean(companyId);
   const [form, setForm] = useState(initialForm);
   const [logo, setLogo] = useState(null);
   const [logoPreview, setLogoPreview] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+  if (!isEditMode) return;
+
+  const fetchCompany = async () => {
+    try {
+      setLoading(true);
+
+      const response = await api.get('/companies');
+      const company = response.data.find(
+        (item) => item.id === Number(companyId)
+      );
+
+      if (!company) {
+        setError('Company not found.');
+        return;
+      }
+
+      setForm({
+        name: company.name || '',
+        industry: company.industry || '',
+        address: company.address || '',
+        website: company.website || '',
+        contact_number: company.contact_number || '',
+        email: company.email || '',
+        size: company.size || '',
+        description: company.description || '',
+      });
+
+      setLogoPreview(
+        company.logo
+          ? `http://127.0.0.1:8000${company.logo}`
+          : ''
+      );
+    } catch (err) {
+      setError('Failed to load company details.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchCompany();
+}, [companyId, isEditMode]);
 
   useEffect(() => {
     if (!logo) {
@@ -96,30 +140,44 @@ const handleSubmit = async (e) => {
     payload.append('logo', logo);
   }
 
-  
-try {
-  const response = await api.post('/companies', payload);
+  try {
+    let response;
 
-  console.log('Company registration successful:', response.data);
+    if (isEditMode) {
+      response = await api.put(`/companies/${companyId}`, payload);
 
-  alert('Company registered successfully!');
+      console.log('Company update successful:', response.data);
 
-  navigate('/employee/companies');
-} catch (err) {
-  console.error('Company registration error:', err.response?.data || err);
+      alert('Company details updated successfully!');
+    } else {
+      response = await api.post('/companies', payload);
 
-  const detail = err.response?.data?.detail;
+      console.log('Company registration successful:', response.data);
 
-  setError(
-    typeof detail === 'string'
-      ? detail
-      : Array.isArray(detail)
-        ? detail.map((item) => item.msg).join(' ')
-        : 'Company registration failed. Please check your details and try again.'
-  );
-} finally {
-  setLoading(false);
-}
+      alert('Company registered successfully!');
+    }
+
+    navigate('/employee/companies');
+  } catch (err) {
+    console.error(
+      isEditMode ? 'Company update error:' : 'Company registration error:',
+      err.response?.data || err
+    );
+
+    const detail = err.response?.data?.detail;
+
+    setError(
+      typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((item) => item.msg).join(' ')
+          : isEditMode
+            ? 'Company update failed. Please check your details and try again.'
+            : 'Company registration failed. Please check your details and try again.'
+    );
+  } finally {
+    setLoading(false);
+  }
 };
 
 
@@ -138,13 +196,15 @@ try {
             Camerin Innovate
           </p>
 
-          <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-            Register a company
-          </h1>
+          <h1>
+  {isEditMode ? 'Edit company details' : 'Register a company'}
+</h1>
 
-          <p className="mt-3 text-sm leading-6 text-slate-500 sm:text-base">
-            Add company details to start creating recruitment opportunities.
-          </p>
+          <p>
+  {isEditMode
+    ? 'Update the company information below.'
+    : 'Add company details to start creating recruitment opportunities.'}
+</p>
         </header>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/60 sm:p-8">
@@ -371,17 +431,13 @@ try {
               disabled={loading || Boolean(success)}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3.5 font-semibold text-white shadow-lg shadow-blue-700/20 transition hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {loading ? (
-                <>
-                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                  Registering company...
-                </>
-              ) : (
-                <>
-                  Register company
-                  <span aria-hidden="true">→</span>
-                </>
-              )}
+              {loading
+  ? isEditMode
+    ? 'Updating company...'
+    : 'Registering company...'
+  : isEditMode
+    ? 'Update company'
+    : 'Register company'}
             </button>
           </form>
         </section>

@@ -1,11 +1,12 @@
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
 
 function PostVacancies() {
-  const { companyId } = useParams();
+  const { companyId, vacancyId } = useParams();
   const navigate = useNavigate();
+  const isEditMode = Boolean(vacancyId);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -21,7 +22,47 @@ function PostVacancies() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  
+  useEffect(() => {
+  if (!isEditMode) return;
 
+  const fetchVacancy = async () => {
+    try {
+      setLoading(true);
+
+      const response = await api.get('/vacancies');
+
+      const vacancy = response.data.find(
+        (item) => item.id === Number(vacancyId)
+      );
+
+      if (!vacancy) {
+        setError('Vacancy not found.');
+        return;
+      }
+
+      setFormData({
+        title: vacancy.title || '',
+        description: vacancy.description || '',
+        required_skills: vacancy.required_skills || '',
+        qualification: vacancy.qualification || '',
+        location: vacancy.location || '',
+        salary_range: vacancy.salary_range || '',
+        employment_type: vacancy.employment_type || 'Full-time',
+        openings: vacancy.openings || 1,
+      });
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+          'Failed to load vacancy details.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchVacancy();
+}, [vacancyId, isEditMode]);
   const handleChange = (e) => {
     const { name, value } = e.target;
 
@@ -32,37 +73,45 @@ function PostVacancies() {
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
+  e.preventDefault();
+  setError('');
+  setSuccess('');
 
-    if (formData.openings < 1) {
-      setError('Openings must be at least 1.');
-      return;
-    }
+  if (formData.openings < 1) {
+    setError('Openings must be at least 1.');
+    return;
+  }
 
-    setLoading(true);
+  setLoading(true);
 
-    try {
+  try {
+    if (isEditMode) {
+      await api.put(`/vacancies/${vacancyId}`, formData);
+
+      setSuccess('Vacancy updated successfully!');
+    } else {
       await api.post('/vacancies', {
         ...formData,
         company_id: Number(companyId),
       });
 
       setSuccess('Vacancy posted successfully!');
-
-      setTimeout(() => {
-        navigate('/employee/vacancies');
-      }, 1200);
-    } catch (err) {
-      setError(
-        err.response?.data?.detail ||
-          'Failed to post vacancy. Please try again.'
-      );
-    } finally {
-      setLoading(false);
     }
-  };
+
+    setTimeout(() => {
+      navigate('/employee/vacancies');
+    }, 1200);
+  } catch (err) {
+    setError(
+      err.response?.data?.detail ||
+        (isEditMode
+          ? 'Failed to update vacancy. Please try again.'
+          : 'Failed to post vacancy. Please try again.')
+    );
+  } finally {
+    setLoading(false);
+  }
+};
 
   const inputClass =
     'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100';
@@ -80,11 +129,13 @@ function PostVacancies() {
           </p>
 
           <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-            Post a Vacancy
+            {isEditMode ? 'Edit Vacancy Details' : 'Post a Vacancy'}
           </h1>
 
           <p className="mt-2 text-slate-500">
-            Create a job opportunity for students to discover and apply.
+            {isEditMode
+  ? 'Update the vacancy information below.'
+  : 'Create a job opportunity for students to discover and apply.'}
           </p>
         </div>
 
@@ -262,7 +313,13 @@ function PostVacancies() {
                 disabled={loading}
                 className="rounded-xl bg-blue-700 px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {loading ? 'Posting...' : 'Post Vacancy'}
+                {loading
+  ? isEditMode
+    ? 'Updating...'
+    : 'Posting...'
+  : isEditMode
+    ? 'Update Vacancy'
+    : 'Post Vacancy'}
               </button>
             </div>
 

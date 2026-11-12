@@ -156,6 +156,16 @@ class VacancyResponse(BaseModel):
     created_by: int
     created_at: datetime
 
+class VacancyUpdate(BaseModel):
+    title: str = Field(min_length=2, max_length=150)
+    description: str = Field(min_length=10)
+    required_skills: str = Field(min_length=1, max_length=1000)
+    qualification: str = Field(min_length=2, max_length=150)
+    location: str = Field(min_length=2, max_length=150)
+    salary_range: str | None = Field(default=None, max_length=100)
+    employment_type: str = Field(min_length=2, max_length=50)
+    openings: int = Field(ge=1)
+
 
 class ApplicationCreate(BaseModel):
     vacancy_id: int
