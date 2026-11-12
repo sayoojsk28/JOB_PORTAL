@@ -2176,8 +2176,20 @@ async def register_student(
         )
 
         db.add(new_student)
+        db.flush()
+
+        log_action(
+            db=db,
+            user_id=new_user.user_id,
+            action="STUDENT_REGISTERED",
+            target_type="student",
+            target_id=new_student.id,
+            details="New student registered.",
+            )
+
         db.commit()
         db.refresh(new_student)
+        
 
     except IntegrityError:
         db.rollback()
@@ -2275,6 +2287,17 @@ def register_employee(
         )
 
         db.add(new_employee)
+        db.flush()
+
+        log_action(
+            db=db,
+            user_id=new_user.user_id,
+            action="EMPLOYEE_REGISTERED",
+            target_type="employee",
+            target_id=new_employee.id,
+            details="New employee registered.",
+        )
+
         db.commit()
         db.refresh(new_employee)
 
@@ -2431,6 +2454,16 @@ def change_admin_password(
 
     admin.hashed_password = new_hashed_password
     user.password_hash = new_hashed_password
+
+    # Log admin password change
+    log_action(
+        db=db,
+        user_id=admin.user_id,
+        action="ADMIN_PASSWORD_CHANGED",
+        target_type="admin",
+        target_id=admin.id,
+        details="Admin password changed",
+    )
 
     db.commit()
     db.refresh(admin)
@@ -2846,6 +2879,7 @@ def get_pending_students(
         for student in students
     ]
 
+
 @app.post("/employee/jobs", response_model=JobResponse, status_code=201)
 def create_job(
     job_data: JobCreate,
@@ -2858,10 +2892,22 @@ def create_job(
     )
 
     db.add(new_job)
+    db.flush()
+
+    log_action(
+        db=db,
+        user_id=employee.user_id,
+        action="JOB_CREATED",
+        target_type="job",
+        target_id=new_job.id,
+        details=f"Job created: {new_job.title}",
+    )
+
     db.commit()
     db.refresh(new_job)
 
     return new_job
+
 
 @app.get("/student/jobs", response_model=list[JobResponse])
 def get_open_jobs(
@@ -2883,6 +2929,7 @@ def ask_chatbot(
     current_user=Depends(require_student),
 ):
     return answer_question(payload.question)
+
 
 
 
@@ -2949,8 +2996,20 @@ def create_company(
     db.add(new_company)
 
     try:
+        db.flush()
+
+        log_action(
+            db=db,
+            user_id=current_user.user_id,
+            action="COMPANY_CREATED",
+            target_type="company",
+            target_id=new_company.id,
+            details=f"Company created: {new_company.name}",
+        )
+
         db.commit()
         db.refresh(new_company)
+
     except Exception:
         db.rollback()
 
@@ -2989,6 +3048,7 @@ def get_companies(
     return companies
 
 
+
 @app.patch("/companies/{company_id}/status", response_model=CompanyResponse)
 def update_company_status(
     company_id: int,
@@ -3020,11 +3080,26 @@ def update_company_status(
             detail="Company not found",
         )
 
-    company.is_active = status
+    previous_status = company.is_active
+
+    if previous_status != status:
+        company.is_active = status
+
+        log_action(
+            db=db,
+            user_id=current_user.user_id,
+            action="COMPANY_STATUS_UPDATED",
+            target_type="company",
+            target_id=company.id,
+            details=f"Company status changed from {previous_status} to {status}",
+        )
+
     db.commit()
     db.refresh(company)
 
     return company
+
+
 
 @app.post(
     "/vacancies",
@@ -3068,10 +3143,22 @@ def create_vacancy(
     )
 
     db.add(new_vacancy)
+    db.flush()
+
+    log_action(
+        db=db,
+        user_id=current_user.user_id,
+        action="VACANCY_CREATED",
+        target_type="vacancy",
+        target_id=new_vacancy.id,
+        details=f"Vacancy created: {new_vacancy.title}",
+    )
+
     db.commit()
     db.refresh(new_vacancy)
 
     return new_vacancy
+
 
 @app.get("/vacancies", response_model=list[VacancyResponse])
 def get_vacancies(
@@ -3159,8 +3246,21 @@ def upload_student_resume(
 
     try:
         db.add(new_resume)
+        db.flush()
+
+        # Log resume upload
+        log_action(
+            db=db,
+            user_id=student.user_id,
+            action="RESUME_UPLOADED",
+            target_type="resume",
+            target_id=new_resume.resume_id,
+            details="Student uploaded a resume",
+        )
+
         db.commit()
         db.refresh(new_resume)
+
     except Exception:
         db.rollback()
 
@@ -3229,6 +3329,18 @@ def submit_application(
     )
 
     db.add(new_application)
+    db.flush()
+
+    # 4. Log application creation
+    log_action(
+        db=db,
+        user_id=student.user_id,
+        action="APPLICATION_CREATED",
+        target_type="application",
+        target_id=new_application.application_id,
+        details=f"Student applied for vacancy ID {vacancy.id}",
+    )
+
     db.commit()
     db.refresh(new_application)
 
@@ -3239,7 +3351,6 @@ def submit_application(
         "resume_id": new_application.resume_id,
         "status": new_application.status,
     }
-
 
 @app.get("/employee/applications")
 def get_all_applications(
@@ -3298,6 +3409,7 @@ class ApplicationStatusUpdate(BaseModel):
     status: str
 
 
+
 @app.patch("/employee/applications/{application_id}/status")
 def update_application_status(
     application_id: int,
@@ -3347,6 +3459,7 @@ def update_application_status(
             detail="Company not found",
         )
 
+    previous_status = application.status
     application.status = "Sent"
 
     notification = models.Notification(
@@ -3356,6 +3469,16 @@ def update_application_status(
     )
 
     db.add(notification)
+
+    log_action(
+        db=db,
+        user_id=employee.user_id,
+        action="APPLICATION_STATUS_UPDATED",
+        target_type="application",
+        target_id=application.application_id,
+        details=f"Application status changed from {previous_status} to Sent",
+    )
+
     db.commit()
     db.refresh(application)
 
@@ -3364,6 +3487,7 @@ def update_application_status(
         "application_id": application.application_id,
         "status": application.status,
     }
+
 
 @app.get("/student/notifications")
 def get_student_notifications(
@@ -3411,6 +3535,7 @@ def mark_notifications_as_read(
         "updated_count": updated_count
     }
 
+
 @app.post("/employee/interviews", response_model=InterviewResponse)
 def create_interview(
     data: InterviewCreate,
@@ -3438,22 +3563,35 @@ def create_interview(
     )
 
     db.add(interview)
+
     notification = models.Notification(
-    student_id=application.student_id,
-    application_id=application.application_id,
-    message=(
-        f"An interview has been scheduled for your application. "
-        f"Date: {data.interview_date}, "
-        f"Time: {data.interview_time}, "
-        f"Mode: {data.mode}."
+        student_id=application.student_id,
+        application_id=application.application_id,
+        message=(
+            f"An interview has been scheduled for your application. "
+            f"Date: {data.interview_date}, "
+            f"Time: {data.interview_time}, "
+            f"Mode: {data.mode}."
+        )
     )
-)
 
     db.add(notification)
+    db.flush()
+
+    log_action(
+        db=db,
+        user_id=employee.user_id,
+        action="INTERVIEW_CREATED",
+        target_type="interview",
+        target_id=interview.interview_id,
+        details=f"Interview scheduled for application {application.application_id}",
+    )
+
     db.commit()
     db.refresh(interview)
 
     return interview
+
 
 @app.get(
     "/employee/interviews",
@@ -3534,7 +3672,22 @@ def update_student_attendance(
             detail="Interview not found"
         )
 
+    previous_attendance = interview.student_attendance
+
     interview.student_attendance = data.student_attendance
+
+    if previous_attendance != data.student_attendance:
+        log_action(
+            db=db,
+            user_id=student.user_id,
+            action="INTERVIEW_ATTENDANCE_UPDATED",
+            target_type="interview",
+            target_id=interview.interview_id,
+            details=(
+                f"Student attendance changed from "
+                f"{previous_attendance} to {data.student_attendance}"
+            ),
+        )
 
     db.commit()
     db.refresh(interview)
@@ -3588,10 +3741,22 @@ def create_interview_result(
     )
 
     db.add(interview_result)
+    db.flush()
+
+    log_action(
+        db=db,
+        user_id=employee.user_id,
+        action="INTERVIEW_RESULT_CREATED",
+        target_type="interview_result",
+        target_id=interview_result.result_id,
+        details=f"Interview result created: {data.result}",
+    )
+
     db.commit()
     db.refresh(interview_result)
 
     return interview_result
+
 
 @app.get(
     "/employee/interview-results",
@@ -3616,6 +3781,7 @@ def get_employee_interview_results(
     )
 
     return results
+
 
 
 
@@ -3704,6 +3870,15 @@ def publish_interview_result(
                 "DEBUG ELIGIBILITY CREATED:",
                 eligibility_created
             )
+
+        log_action(
+            db=db,
+            user_id=employee.user_id,
+            action="INTERVIEW_RESULT_PUBLISHED",
+            target_type="interview_result",
+            target_id=interview_result.result_id,
+            details="Interview result published",
+        )
 
     db.commit()
     db.refresh(interview_result)
@@ -3794,6 +3969,7 @@ def get_audit_logs(
     }
 
 
+
 @app.get("/employee/audit-logs")
 def get_employee_audit_logs(
     page: int = 1,
@@ -3814,15 +3990,20 @@ def get_employee_audit_logs(
             detail="Limit must be between 1 and 100"
         )
 
+    # Get all student user IDs
+    student_user_ids = [
+        row[0]
+        for row in db.query(models.Student.user_id).all()
+    ]
+
+    # Include only this employee and all students
+    visible_user_ids = list(set(
+        student_user_ids + [employee.user_id]
+    ))
+
     # Base query
     query = db.query(models.AuditLog).filter(
-        models.AuditLog.user_id == employee.user_id,
-        models.AuditLog.action.in_([
-            "LOGIN_SUCCESS",
-            "LOGIN_FAILED",
-            "LOGIN_BLOCKED",
-            "STUDENT_STATUS_UPDATED",
-        ])
+        models.AuditLog.user_id.in_(visible_user_ids)
     )
 
     # Total number of logs
@@ -3847,6 +4028,7 @@ def get_employee_audit_logs(
         "limit": limit,
         "total_pages": total_pages
     }
+
 
 @app.get("/admin/students/active")
 def get_active_students(
@@ -4029,6 +4211,19 @@ def send_announcement(
 
         student_count = len(students)
 
+    log_action(
+        db=db,
+        user_id=admin.user_id,
+        action="ANNOUNCEMENT_CREATED",
+        target_type="announcement",
+        target_id=None,
+        details=(
+            f"Announcement sent to {recipient_type}. "
+            f"Employees notified: {employee_count}, "
+            f"Students notified: {student_count}."
+        ),
+    )
+
     db.commit()
 
     return {
@@ -4062,6 +4257,18 @@ def submit_student_feedback(
     )
 
     db.add(new_feedback)
+    db.flush()
+
+    # Log feedback creation
+    log_action(
+        db=db,
+        user_id=student.user_id,
+        action="STUDENT_FEEDBACK_CREATED",
+        target_type="student_feedback",
+        target_id=new_feedback.feedback_id,
+        details="Student submitted feedback",
+    )
+
     db.commit()
     db.refresh(new_feedback)
 
@@ -4202,6 +4409,7 @@ def mark_admin_feedback_notifications_seen(
         "message": "Admin feedback notifications marked as seen",
         "updated_count": updated_count
     }
+
 @app.post("/auth/employee/change-password")
 def change_employee_password(
     password_data: AdminChangePassword,
@@ -4240,12 +4448,23 @@ def change_employee_password(
     employee.hashed_password = new_hashed_password
     user.password_hash = new_hashed_password
 
+    # Audit log
+    log_action(
+        db=db,
+        user_id=employee.user_id,
+        action="EMPLOYEE_PASSWORD_CHANGED",
+        target_type="employee",
+        target_id=employee.id,
+        details="Employee password changed",
+    )
+
     db.commit()
     db.refresh(employee)
 
     return {
         "message": "Password changed successfully"
     }
+
 
 @app.get("/employee/announcements")
 def get_employee_announcements(
@@ -4307,13 +4526,24 @@ def send_employee_announcement(
         )
         db.add(notification)
 
+    log_action(
+        db=db,
+        user_id=employee.user_id,
+        action="ANNOUNCEMENT_CREATED",
+        target_type="announcement",
+        target_id=None,
+        details=(
+            f"Employee sent announcement to students. "
+            f"Students notified: {len(students)}."
+        ),
+    )
+
     db.commit()
 
     return {
         "message": "Announcement sent successfully",
         "students_notified": len(students)
     }
-
 
 @app.get("/employee/training-eligibilities")
 def get_training_eligibilities(
@@ -4373,6 +4603,7 @@ def get_training_eligibilities(
         }
         for eligibility, student, course in eligibilities
     ]
+
 
 @app.patch("/employee/training-eligibilities/{eligibility_id}/claim")
 def claim_training_eligibility(
@@ -4445,6 +4676,15 @@ def claim_training_eligibility(
         synchronize_session=False
     )
 
+    log_action(
+        db=db,
+        user_id=employee.user_id,
+        action="TRAINING_ELIGIBILITY_CLAIMED",
+        target_type="training_eligibility",
+        target_id=eligibility_id,
+        details="Training eligibility claimed by employee",
+    )
+
     db.commit()
 
     return {
@@ -4452,7 +4692,6 @@ def claim_training_eligibility(
         "eligibility_id": eligibility_id,
         "claimed_by": employee.id,
     }
-
 
 
 @app.patch("/employee/training-eligibilities/{eligibility_id}/approve")
@@ -4720,9 +4959,23 @@ def approve_training_eligibility(
 
         db.add(student_notification)
 
-        # 8. Commit everything together
+        # 8. Log training eligibility approval
+        log_action(
+            db=db,
+            user_id=employee.user_id,
+            action="TRAINING_ELIGIBILITY_APPROVED",
+            target_type="training_eligibility",
+            target_id=eligibility.id,
+            details=(
+                f"Training eligibility approved. "
+                f"{len(created_courses)} course(s) created."
+            ),
+        )
+
+        # 9. Commit everything together
         db.commit()
         db.refresh(eligibility)
+
 
         return {
             "message": (
@@ -4821,6 +5074,16 @@ def create_training_course(
         db.add(part)
         db.flush()
 
+                # Log training course creation
+        log_action(
+            db=db,
+            user_id=employee.user_id,
+            action="TRAINING_COURSE_CREATED",
+            target_type="training_course",
+            target_id=course.id,
+            details=f"Training course created for {course.job_role}",
+        )
+
         course_id = course.id
         enrollment_id = enrollment.id
         part_id = part.id
@@ -4846,6 +5109,7 @@ def create_training_course(
         "part_id": part_id,
         "generation_status": "Pending",
     }
+
 
 @app.patch("/employee/training-eligibilities/{eligibility_id}/reject")
 def reject_training_eligibility(
@@ -4876,6 +5140,15 @@ def reject_training_eligibility(
     eligibility.reviewed_by = employee.id
     eligibility.reviewed_at = datetime.now()
 
+    log_action(
+        db=db,
+        user_id=employee.user_id,
+        action="TRAINING_ELIGIBILITY_REJECTED",
+        target_type="training_eligibility",
+        target_id=eligibility.id,
+        details="Training eligibility rejected by employee",
+    )
+
     db.commit()
     db.refresh(eligibility)
 
@@ -4885,6 +5158,7 @@ def reject_training_eligibility(
         "status": eligibility.status,
         "reviewed_by": eligibility.reviewed_by,
     }
+
 
 @app.get("/employee/students/active")
 def get_active_students(
@@ -5139,13 +5413,21 @@ def change_student_password(
     student.hashed_password = new_hashed_password
     user.password_hash = new_hashed_password
 
+    log_action(
+        db=db,
+        user_id=student.user_id,
+        action="STUDENT_PASSWORD_CHANGED",
+        target_type="student",
+        target_id=student.id,
+        details="Student password changed",
+    )
+
     db.commit()
     db.refresh(student)
 
     return {
         "message": "Password changed successfully"
     }
-
 
 @app.delete("/admin/student-feedback/{feedback_id}")
 def delete_student_feedback(
@@ -5163,13 +5445,21 @@ def delete_student_feedback(
             detail="Feedback not found",
         )
 
+    log_action(
+        db=db,
+        user_id=admin.user_id,
+        action="STUDENT_FEEDBACK_DELETED",
+        target_type="student_feedback",
+        target_id=feedback.feedback_id,
+        details="Student feedback deleted by admin",
+    )
+
     db.delete(feedback)
     db.commit()
 
     return {
         "message": "Feedback deleted successfully"
     }
-
 @app.patch("/student/my-profile/placed")
 def update_my_placed_status(
     is_placed: bool,
@@ -5185,6 +5475,20 @@ def update_my_placed_status(
         create_training_eligibility_if_eligible(
             db,
             current_user.id
+        )
+
+    # Log only when Placed status actually changes
+    if was_placed != is_placed:
+        log_action(
+            db=db,
+            user_id=current_user.user_id,
+            action="PLACED_STATUS_UPDATED",
+            target_type="student",
+            target_id=current_user.id,
+            details=(
+                f"Placed status changed from "
+                f"{was_placed} to {is_placed}"
+            ),
         )
 
     db.commit()
@@ -5446,7 +5750,7 @@ def analyze_student_interview(
             detail="Interview analysis validation failed. Please try again."
         )
 
-    # --------------------------------------------------
+        # --------------------------------------------------
     # 7. SAVE ANALYSIS HISTORY
     # --------------------------------------------------
 
@@ -5461,6 +5765,18 @@ def analyze_student_interview(
 
     try:
         db.add(analysis)
+        db.flush()
+
+        # Log interview analysis creation
+        log_action(
+            db=db,
+            user_id=student.user_id,
+            action="INTERVIEW_ANALYSIS_CREATED",
+            target_type="interview_analysis",
+            target_id=analysis.id,
+            details="Student created an AI interview self-analysis",
+        )
+
         db.commit()
         db.refresh(analysis)
 
@@ -5473,7 +5789,6 @@ def analyze_student_interview(
             status_code=500,
             detail="Failed to save interview analysis."
         )
-
     # --------------------------------------------------
     # 8. FORMAT HOLISTIC ANALYSIS FOR PDF
     # --------------------------------------------------
@@ -6132,7 +6447,7 @@ def generate_student_training_pdf(
                 detail=f"PDF generation failed: {str(pdf_error)}"
             )
 
-        # 11. Save submission
+                # 11. Save submission
         submission = models.TrainingCourseSubmission(
             enrollment_id=enrollment.id,
             answers=question_answers,
@@ -6145,6 +6460,18 @@ def generate_student_training_pdf(
         )
 
         db.add(submission)
+        db.flush()
+
+        # Log training submission creation
+        log_action(
+            db=db,
+            user_id=student.user_id,
+            action="TRAINING_SUBMISSION_CREATED",
+            target_type="training_course_submission",
+            target_id=submission.id,
+            details="Student submitted training questionnaire",
+        )
+
         db.commit()
         db.refresh(submission)
 
@@ -6296,6 +6623,17 @@ def complete_student_training_course(
     )
 
     db.add(notification)
+
+    # Log training course completion
+    log_action(
+        db=db,
+        user_id=student.user_id,
+        action="TRAINING_COURSE_COMPLETED",
+        target_type="training_enrollment",
+        target_id=enrollment.id,
+        details=f"Student completed training course for {course.job_role}",
+    )
+
     db.commit()
 
     return {
@@ -6304,7 +6642,6 @@ def complete_student_training_course(
         "enrollment_id": enrollment.id,
         "status": "Completed"
     }
-
 
 @app.get("/student/training-courses/{course_id}/submission")
 def get_student_training_course_submission(
