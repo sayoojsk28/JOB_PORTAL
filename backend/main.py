@@ -7,6 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from pwdlib import PasswordHash
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import or_
 import re
 import json
 
@@ -3347,8 +3348,14 @@ def update_company(
 
     return company
 
-@app.get("/companies", response_model=list[CompanyResponse])
+
+
+@app.get("/companies")
 def get_companies(
+    page: int = 1,
+    limit: int = 10,
+    search: str = "",
+    status: str | None = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -3358,15 +3365,69 @@ def get_companies(
             detail="Only employees can view companies",
         )
 
+    query = db.query(models.Company)
+
+    # Filter by company status
+    if status:
+        query = query.filter(
+            models.Company.is_active == status
+        )
+
+    # Search by company name or email
+    if search.strip():
+        search_term = f"%{search.strip()}%"
+        query = query.filter(
+            or_(
+                models.Company.name.ilike(search_term),
+                models.Company.email.ilike(search_term),
+            )
+        )
+
+    total_companies = query.count()
+
     companies = (
-        db.query(models.Company)
+        query
         .order_by(models.Company.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
         .all()
     )
 
-    return companies
+    total_pages = (total_companies + limit - 1) // limit
+
+    return {
+        "companies": companies,
+        "total_companies": total_companies,
+        "total_pages": total_pages,
+        "current_page": page,
+        "limit": limit,
+    }
 
 
+
+@app.get("/companies/{company_id}", response_model=CompanyResponse)
+def get_company_details(
+    company_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not isinstance(current_user, models.Employee):
+        raise HTTPException(
+            status_code=403,
+            detail="Only employees can view company details",
+        )
+
+    company = db.query(models.Company).filter(
+        models.Company.id == company_id
+    ).first()
+
+    if not company:
+        raise HTTPException(
+            status_code=404,
+            detail="Company not found",
+        )
+
+    return company
 
 @app.patch("/companies/{company_id}/status", response_model=CompanyResponse)
 def update_company_status(
@@ -4646,32 +4707,102 @@ def submit_student_feedback(
         "feedback_id": new_feedback.feedback_id
     }
 
+# @app.get("/admin/student-feedback")
+# def get_student_feedback(
+#     db: Session = Depends(get_db),
+#     admin: models.Admin = Depends(require_admin),
+# ):
+#     feedbacks = (
+#         db.query(models.StudentFeedback)
+#         .join(
+#             models.Student,
+#             models.StudentFeedback.student_id == models.Student.id
+#         )
+#         .order_by(models.StudentFeedback.created_at.desc())
+#         .all()
+#     )
+
+#     return [
+#         {
+#             "feedback_id": item.feedback_id,
+#             "student_name": item.student.full_name,
+#             "student_email": item.student.email,
+#             "message": item.message,
+#             "created_at": item.created_at,
+#         }
+#         for item in feedbacks
+#     ]
+
+
+
 @app.get("/admin/student-feedback")
 def get_student_feedback(
+    page: int = 1,
+    limit: int = 10,
+    search: str = "",
     db: Session = Depends(get_db),
     admin: models.Admin = Depends(require_admin),
 ):
-    feedbacks = (
+    # Validate pagination
+    if page < 1:
+        page = 1
+
+    if limit < 1:
+        limit = 10
+
+    if limit > 100:
+        limit = 100
+
+    # Base query
+    query = (
         db.query(models.StudentFeedback)
         .join(
             models.Student,
             models.StudentFeedback.student_id == models.Student.id
         )
+    )
+
+    # Search by student name, email or feedback message
+    if search.strip():
+        search_term = f"%{search.strip()}%"
+
+        query = query.filter(
+            models.Student.full_name.ilike(search_term)
+            | models.Student.email.ilike(search_term)
+            | models.StudentFeedback.message.ilike(search_term)
+        )
+
+    # Count after applying search filter
+    total_feedback = query.count()
+
+    # Calculate total pages
+    total_pages = (total_feedback + limit - 1) // limit
+
+    # Fetch current page
+    feedbacks = (
+        query
         .order_by(models.StudentFeedback.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
         .all()
     )
 
-    return [
-        {
-            "feedback_id": item.feedback_id,
-            "student_name": item.student.full_name,
-            "student_email": item.student.email,
-            "message": item.message,
-            "created_at": item.created_at,
-        }
-        for item in feedbacks
-    ]
-
+    return {
+        "feedbacks": [
+            {
+                "feedback_id": item.feedback_id,
+                "student_name": item.student.full_name,
+                "student_email": item.student.email,
+                "message": item.message,
+                "created_at": item.created_at,
+            }
+            for item in feedbacks
+        ],
+        "total_feedback": total_feedback,
+        "total_pages": total_pages,
+        "current_page": page,
+        "limit": limit,
+    }
 
 @app.get("/admin/feedback-notifications")
 def get_admin_feedback_notifications(
@@ -4689,7 +4820,7 @@ def get_admin_feedback_notifications(
         .all()
     )
 
-    # Fetch feedback notifications already seen by this admin
+    # Get feedback IDs already seen by this admin
     seen_ids = {
         item.feedback_id
         for item in db.query(models.AdminNotificationRead.feedback_id)
@@ -4699,26 +4830,27 @@ def get_admin_feedback_notifications(
         .all()
     }
 
-    return [
-        {
-            "notification_id": item.feedback_id,
+    notifications = []
+
+    for item in feedbacks:
+        feedback_data = {
             "feedback_id": item.feedback_id,
             "student_name": item.student.full_name,
             "student_email": item.student.email,
-            "message": f"{item.student.full_name} submitted new feedback",
+            "message": item.message,
+            "created_at": item.created_at,
+        }
+
+        notifications.append({
+            "notification_id": item.feedback_id,
+            "feedback_id": item.feedback_id,
+            "message": f"New feedback received from {item.student.full_name}",
             "created_at": item.created_at,
             "is_read": item.feedback_id in seen_ids,
-            "feedback": {
-                "feedback_id": item.feedback_id,
-                "student_name": item.student.full_name,
-                "student_email": item.student.email,
-                "message": item.message,
-                "created_at": item.created_at,
-            }
-        }
-        for item in feedbacks
-    ]
+            "feedback": feedback_data,
+        })
 
+    return notifications
 
 @app.patch("/admin/feedback-notifications/seen")
 def mark_admin_feedback_notifications_seen(

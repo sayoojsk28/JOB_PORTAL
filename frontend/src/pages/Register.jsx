@@ -1,6 +1,12 @@
 
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import {
+  getCountries,
+  getCountryCallingCode,
+  parsePhoneNumber,
+} from 'react-phone-number-input';
+import countryNames from 'react-phone-number-input/locale/en.json';
 import api from '../services/api';
 
 const initialForm = {
@@ -28,6 +34,9 @@ const Register = () => {
   const navigate = useNavigate();
 
   const [role, setRole] = useState('student');
+  const [selectedCountry, setSelectedCountry] = useState('IN');
+  const [countrySearch, setCountrySearch] = useState('');
+  const [isCountryDropdownOpen, setIsCountryDropdownOpen] = useState(false);
   const [form, setForm] = useState(initialForm);
   const [profilePhoto, setProfilePhoto] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -113,12 +122,23 @@ const Register = () => {
     const validationErrors = [];
 
 const phone = form.phone.trim();
+let normalizedPhone = '';
 
-// Phone validation
-if (!/^[0-9+-]+$/.test(phone)) {
+try {
+  const parsedPhone = parsePhoneNumber(phone, selectedCountry);
+
+  if (!parsedPhone || !parsedPhone.isValid()) {
+    validationErrors.push({
+      fieldId: 'phone',
+      message: 'Please enter a valid phone number for the selected country.',
+    });
+  } else {
+    normalizedPhone = parsedPhone.number;
+  }
+} catch {
   validationErrors.push({
     fieldId: 'phone',
-    message: 'Phone number can contain only digits, plus (+) and hyphens (-).',
+    message: 'Please enter a valid phone number.',
   });
 }
 
@@ -172,7 +192,7 @@ if (validationErrors.length > 0) {
 
     payload.append('full_name', form.full_name.trim());
     payload.append('email', form.email.trim());
-    payload.append('phone', form.phone.trim());
+    payload.append('phone', normalizedPhone);
     payload.append('password', form.password);
 
     if (role === 'student') {
@@ -228,6 +248,28 @@ if (validationErrors.length > 0) {
     setError('');
     setSuccess('');
   };
+
+  const countries = getCountries()
+  .map((countryCode) => ({
+    code: countryCode,
+    name: countryNames[countryCode],
+    callingCode: getCountryCallingCode(countryCode),
+  }))
+  .filter((country) => country.name)
+  .sort((a, b) => a.name.localeCompare(b.name));
+
+const filteredCountries = countries.filter((country) => {
+  const search = countrySearch.trim().toLowerCase();
+
+  return (
+    country.name.toLowerCase().includes(search) ||
+    `+${country.callingCode}`.includes(search)
+  );
+});
+
+const selectedCountryData = countries.find(
+  (country) => country.code === selectedCountry
+);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-slate-100 px-4 py-8 sm:px-6 sm:py-12">
@@ -352,24 +394,97 @@ if (validationErrors.length > 0) {
                 />
               </div>
 
-              <div>
+              <div className="sm:col-span-2">
   <label className={labelClass} htmlFor="phone">
     Phone number
   </label>
 
-  <input
-    className={inputClass}
-    id="phone"
-    name="phone"
-    type="tel"
-    value={form.phone}
-    onChange={handleChange}
-    placeholder="Enter phone number"
-    pattern="[0-9+-]+"
-    title="Only numbers, plus (+) and hyphens (-) are allowed."
-    autoComplete="tel"
-    required
-  />
+  <div className="flex gap-2">
+    {/* Country selector */}
+    <div className="relative w-[40%] max-w-xs shrink-0">
+      <button
+        type="button"
+        onClick={() => {
+          setIsCountryDropdownOpen((previous) => !previous);
+          setCountrySearch('');
+        }}
+        className={`${inputClass} flex items-center justify-between gap-2 text-left`}
+        aria-expanded={isCountryDropdownOpen}
+      >
+        <span className="truncate">
+          {selectedCountryData?.name || 'Select country'}
+        </span>
+        <span className="text-slate-400">⌄</span>
+      </button>
+
+      {isCountryDropdownOpen && (
+        <div className="absolute left-0 top-full z-50 mt-2 w-full min-w-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+          {/* Search */}
+          <div className="sticky top-0 border-b border-slate-100 bg-white p-2">
+            <input
+              type="text"
+              value={countrySearch}
+              onChange={(e) => setCountrySearch(e.target.value)}
+              placeholder="Search country..."
+              autoFocus
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* Country list */}
+          <div className="max-h-60 overflow-y-auto">
+            {filteredCountries.length > 0 ? (
+              filteredCountries.map((country) => (
+                <button
+                  key={country.code}
+                  type="button"
+                  onClick={() => {
+                    setSelectedCountry(country.code);
+                    setIsCountryDropdownOpen(false);
+                    setCountrySearch('');
+                  }}
+                  className={`flex w-full items-center justify-between px-3 py-2.5 text-left text-sm transition hover:bg-blue-50 ${
+                    selectedCountry === country.code
+                      ? 'bg-blue-50 font-semibold text-blue-700'
+                      : 'text-slate-700'
+                  }`}
+                >
+                  <span>{country.name}</span>
+                  <span className="ml-3 text-slate-500">
+                    +{country.callingCode}
+                  </span>
+                </button>
+              ))
+            ) : (
+              <p className="px-3 py-4 text-center text-sm text-slate-500">
+                No countries found.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+
+    {/* Calling code */}
+    <div className="flex w-[76px] shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 px-2 py-3 font-semibold text-slate-700">
+      +{selectedCountryData?.callingCode}
+    </div>
+
+    {/* Phone number */}
+    <input
+      className={`${inputClass} min-w-0 flex-1`}
+      id="phone"
+      name="phone"
+      type="tel"
+      value={form.phone}
+      onChange={handleChange}
+      placeholder="Phone number"
+      pattern="[0-9]+"
+      title="Please enter digits only."
+      autoComplete="tel-national"
+      required
+    />
+  </div>
 </div>
 
               {role === 'employee' && (

@@ -16,6 +16,12 @@ const dashboardCards = [
     path: '/employee/companies',
   },
   {
+  title: 'View Accepted Companies',
+  description: 'View all approved companies and manage their vacancy postings.',
+  icon: '✅',
+  path: '/employee/accepted-companies',
+},
+  {
     title: 'View Current Vacancies',
     description: 'Manage and view all currently posted job vacancies.',
     icon: '💼',

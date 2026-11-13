@@ -10,13 +10,30 @@ export default function AdminStudentFeedback() {
   const [errorMessage, setErrorMessage] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Fetch feedback
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalFeedback, setTotalFeedback] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
+  const limit = 10;
+
+  // Fetch feedback with backend pagination and search
   useEffect(() => {
     const fetchFeedbacks = async () => {
       try {
         setLoading(true);
-        const response = await api.get('/admin/student-feedback');
-        setFeedbacks(response.data);
+        setErrorMessage('');
+
+        const response = await api.get('/admin/student-feedback', {
+          params: {
+            page: currentPage,
+            limit,
+            search: searchTerm.trim(),
+          },
+        });
+
+        setFeedbacks(response.data.feedbacks);
+        setTotalFeedback(response.data.total_feedback);
+        setTotalPages(response.data.total_pages);
       } catch (error) {
         setErrorMessage(
           error.response?.data?.detail || 'Failed to load student feedback.'
@@ -27,7 +44,7 @@ export default function AdminStudentFeedback() {
     };
 
     fetchFeedbacks();
-  }, []);
+  }, [currentPage, searchTerm]);
 
   // Delete feedback when marked as Read
   const handleStatusChange = async (feedbackId) => {
@@ -37,11 +54,23 @@ export default function AdminStudentFeedback() {
 
       await api.delete(`/admin/student-feedback/${feedbackId}`);
 
-      setFeedbacks((previousFeedbacks) =>
-        previousFeedbacks.filter(
-          (item) => item.feedback_id !== feedbackId
-        )
-      );
+      const remainingFeedbacks = feedbacks.length - 1;
+
+      if (remainingFeedbacks === 0 && currentPage > 1) {
+        setCurrentPage((previousPage) => previousPage - 1);
+      } else {
+        const response = await api.get('/admin/student-feedback', {
+          params: {
+            page: currentPage,
+            limit,
+            search: searchTerm.trim(),
+          },
+        });
+
+        setFeedbacks(response.data.feedbacks);
+        setTotalFeedback(response.data.total_feedback);
+        setTotalPages(response.data.total_pages);
+      }
     } catch (error) {
       setErrorMessage(
         error.response?.data?.detail || 'Failed to delete feedback.'
@@ -51,19 +80,13 @@ export default function AdminStudentFeedback() {
     }
   };
 
-  // Search feedback
-  const filteredFeedbacks = feedbacks.filter((item) => {
-    const search = searchTerm.toLowerCase();
+  // Reset to first page when searching
+  const handleSearchChange = (value) => {
+    setSearchTerm(value);
+    setCurrentPage(1);
+  };
 
-    return (
-      item.student_name.toLowerCase().includes(search) ||
-      item.student_email.toLowerCase().includes(search) ||
-      item.message.toLowerCase().includes(search)
-    );
-  });
-
-  const totalFeedback = feedbacks.length;
-  const unreadCount = feedbacks.length;
+  const unreadCount = totalFeedback;
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8 sm:px-8">
@@ -110,14 +133,11 @@ export default function AdminStudentFeedback() {
           <input
             type="text"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Search by student name, email or feedback..."
             className="w-full rounded-lg border border-slate-300 py-3 px-4 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
           />
         </div>
-
-        {/* Loading */}
-        {loading && <p>Loading feedback...</p>}
 
         {/* Error */}
         {errorMessage && (
@@ -126,72 +146,110 @@ export default function AdminStudentFeedback() {
           </p>
         )}
 
+        {/* Loading */}
+        {loading && <p>Loading feedback...</p>}
+
         {/* Feedback Table */}
         {!loading && (
-          <div className="mt-6 overflow-x-auto rounded-lg border border-gray-200 bg-white">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-gray-100 text-gray-700">
-                <tr>
-                  <th className="px-5 py-4">Student</th>
-                  <th className="px-5 py-4">Email</th>
-                  <th className="px-5 py-4">Feedback</th>
-                  <th className="px-5 py-4">Submitted On</th>
-                  <th className="px-5 py-4">Action</th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-gray-200">
-                {filteredFeedbacks.map((item) => (
-                  <tr key={item.feedback_id} className="hover:bg-gray-50">
-                    <td className="px-5 py-4 font-medium">
-                      {item.student_name}
-                    </td>
-
-                    <td className="px-5 py-4 text-gray-600">
-                      {item.student_email}
-                    </td>
-
-                    <td className="px-5 py-4">
-                      <Link
-                        to={`/admin/student-feedback/${item.feedback_id}`}
-                        state={{ feedback: item }}
-                        className="font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
-                      >
-                        View Feedback
-                      </Link>
-                    </td>
-
-                    <td className="px-5 py-4 text-gray-600 whitespace-nowrap">
-                      {new Date(item.created_at).toLocaleString()}
-                    </td>
-
-                    <td className="px-5 py-4">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleStatusChange(item.feedback_id)
-                        }
-                        disabled={deletingId === item.feedback_id}
-                        className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {deletingId === item.feedback_id
-                          ? 'Processing...'
-                          : 'Mark as Read'}
-                      </button>
-                    </td>
+          <>
+            <div className="mt-6 overflow-x-auto rounded-lg border border-gray-200 bg-white">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-gray-100 text-gray-700">
+                  <tr>
+                    <th className="px-5 py-4">Student</th>
+                    <th className="px-5 py-4">Email</th>
+                    <th className="px-5 py-4">Feedback</th>
+                    <th className="px-5 py-4">Submitted On</th>
+                    <th className="px-5 py-4">Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
 
-            {filteredFeedbacks.length === 0 && (
-              <p className="p-6 text-center text-gray-500">
-                {feedbacks.length === 0
-                  ? 'No feedback received yet.'
-                  : 'No matching feedback found.'}
-              </p>
+                <tbody className="divide-y divide-gray-200">
+                  {feedbacks.map((item) => (
+                    <tr key={item.feedback_id} className="hover:bg-gray-50">
+                      <td className="px-5 py-4 font-medium">
+                        {item.student_name}
+                      </td>
+
+                      <td className="px-5 py-4 text-gray-600">
+                        {item.student_email}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <Link
+                          to={`/admin/student-feedback/${item.feedback_id}`}
+                          state={{ feedback: item }}
+                          className="font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+                        >
+                          View Feedback
+                        </Link>
+                      </td>
+
+                      <td className="px-5 py-4 text-gray-600 whitespace-nowrap">
+                        {new Date(item.created_at).toLocaleString()}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <button
+                          type="button"
+                          onClick={() => handleStatusChange(item.feedback_id)}
+                          disabled={deletingId === item.feedback_id}
+                          className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {deletingId === item.feedback_id
+                            ? 'Processing...'
+                            : 'Mark as Read'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {feedbacks.length === 0 && (
+                <p className="p-6 text-center text-gray-500">
+                  {searchTerm.trim()
+                    ? 'No matching feedback found.'
+                    : 'No feedback received yet.'}
+                </p>
+              )}
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 0 && (
+              <div className="mt-5 flex flex-col items-center justify-between gap-4 sm:flex-row">
+                <p className="text-sm text-gray-600">
+                  Showing {((currentPage - 1) * limit) + 1} -{' '}
+                  {Math.min(currentPage * limit, totalFeedback)} of{' '}
+                  {totalFeedback} feedbacks
+                </p>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((prev) => prev - 1)}
+                    disabled={currentPage === 1}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Previous
+                  </button>
+
+                  <span className="px-3 text-sm font-semibold text-gray-700">
+                    Page {currentPage} of {totalPages}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((prev) => prev + 1)}
+                    disabled={currentPage >= totalPages}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             )}
-          </div>
+          </>
         )}
       </div>
     </div>

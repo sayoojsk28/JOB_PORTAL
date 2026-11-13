@@ -34,9 +34,24 @@ const ChangePassword = () => {
     setSuccess('');
 
     if (form.new_password.length < 8) {
-      setError('New password must be at least 8 characters long.');
+      setError('Password must contain at least 8 characters.');
       return;
-    }
+      }
+
+    if (!/[A-Z]/.test(form.new_password)) {
+      setError('Password must contain at least one uppercase letter.');
+      return;
+      }
+
+    if (!/[0-9]/.test(form.new_password)) {
+      setError('Password must contain at least one number.');
+      return;
+      }
+
+    if (!/[^A-Za-z0-9]/.test(form.new_password)) {
+      setError('Password must contain at least one special symbol.');
+      return;
+      }
 
     if (form.new_password !== form.confirm_password) {
       setError('New password and confirmation do not match.');
@@ -173,44 +188,50 @@ const ChangePassword = () => {
                 className={inputClass}
                 placeholder="Enter your new password"
                 minLength={8}
+                pattern="(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{8,}"
                 maxLength={128}
                 required
               />
 
               <p className="mt-2 text-xs text-slate-500">
-                Use at least 8 characters.
+               Minimum 8 characters, including one uppercase letter, one number and one special symbol.
               </p>
 
               {form.new_password.length > 0 && (
-                <div className="mt-3">
+                <div className="mt-3 space-y-2">
+  {[
+    {
+      label: 'At least 8 characters',
+      valid: form.new_password.length >= 8,
+    },
+    {
+      label: 'One uppercase letter (A-Z)',
+      valid: /[A-Z]/.test(form.new_password),
+    },
+    {
+      label: 'One number (0-9)',
+      valid: /[0-9]/.test(form.new_password),
+    },
+    {
+      label: 'One special symbol (@, #, !, etc.)',
+      valid: /[^A-Za-z0-9]/.test(form.new_password),
+    },
+  ].map((rule, index) => (
+    <div key={index} className="flex items-center justify-between text-xs">
+      <span className="text-slate-500">
+        {rule.label}
+      </span>
 
-                  <div className="mb-1 flex justify-between text-xs">
-                    <span className="text-slate-500">
-                      Password length
-                    </span>
-
-                    <span className="font-semibold text-slate-700">
-                      {form.new_password.length}/8 minimum
-                    </span>
-                  </div>
-
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        form.new_password.length >= 8
-                          ? 'bg-emerald-500'
-                          : 'bg-amber-400'
-                      }`}
-                      style={{
-                        width: `${Math.min(
-                          (form.new_password.length / 8) * 100,
-                          100
-                        )}%`,
-                      }}
-                    />
-                  </div>
-
-                </div>
+      <span
+        className={`font-semibold ${
+          rule.valid ? 'text-emerald-600' : 'text-slate-400'
+        }`}
+      >
+        {rule.valid ? '✓ Met' : '○ Required'}
+      </span>
+    </div>
+  ))}
+</div>
               )}
             </div>
 

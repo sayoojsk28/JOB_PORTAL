@@ -95,7 +95,7 @@ function PostVacancies() {
         company_id: Number(companyId),
       });
 
-      setSuccess('Vacancy posted successfully!');
+      alert('Vacancy posted successfully!');
     }
 
     setTimeout(() => {

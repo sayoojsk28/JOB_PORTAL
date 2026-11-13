@@ -147,7 +147,7 @@ const ViewInterview = () => {
   }
   className="mt-6 w-full rounded-xl bg-blue-700 px-5 py-3 font-semibold text-white transition hover:bg-blue-800"
 >
-  Publish Results
+  Post Results
 </button>
               </div>
             ))}

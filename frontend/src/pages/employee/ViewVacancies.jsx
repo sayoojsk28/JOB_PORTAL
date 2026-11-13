@@ -339,7 +339,7 @@ function ViewVacancies() {
     onClick={() =>
       navigate(`/employee/vacancies/${vacancy.id}/edit`)
     }
-    className="mt-4 w-full rounded-xl bg-amber-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-amber-700"
+    className="mt-4 w-full rounded-xl bg-blue-800 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-800"
   >
     Edit Details
   </button>
