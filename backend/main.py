@@ -3540,8 +3540,11 @@ def create_vacancy(
     return new_vacancy
 
 
-@app.get("/vacancies", response_model=list[VacancyResponse])
+@app.get("/vacancies")
 def get_vacancies(
+    page: int = 1,
+    limit: int = 10,
+    search: str = "",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -3551,13 +3554,40 @@ def get_vacancies(
             detail="Only employees can view vacancies",
         )
 
+    query = db.query(models.Vacancy)
+
+    if search.strip():
+        search_term = f"%{search.strip()}%"
+
+        query = query.filter(
+            or_(
+                models.Vacancy.title.ilike(search_term),
+                models.Vacancy.location.ilike(search_term),
+                models.Vacancy.required_skills.ilike(search_term),
+                models.Vacancy.qualification.ilike(search_term),
+                models.Vacancy.employment_type.ilike(search_term),
+            )
+        )
+
+    total_vacancies = query.count()
+
     vacancies = (
-        db.query(models.Vacancy)
+        query
         .order_by(models.Vacancy.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
         .all()
     )
 
-    return vacancies
+    total_pages = (total_vacancies + limit - 1) // limit
+
+    return {
+        "vacancies": vacancies,
+        "total_vacancies": total_vacancies,
+        "total_pages": total_pages,
+        "current_page": page,
+        "limit": limit,
+    }
 
 @app.put(
     "/vacancies/{vacancy_id}",
@@ -5663,28 +5693,61 @@ def reject_training_eligibility(
 
 @app.get("/employee/students/active")
 def get_active_students(
+    page: int = 1,
+    limit: int = 20,
+    search: str = "",
     db: Session = Depends(get_db),
     employee=Depends(require_employee),
 ):
-    students = db.query(models.Student).filter(
+    query = db.query(models.Student).filter(
         models.Student.status == "Active"
-    ).all()
+    )
 
-    return [
-        {
-            "id": student.id,
-            "full_name": student.full_name,
-            "email": student.email,
-            "phone": student.phone,
-            "qualification": student.qualification,
-            "department": student.department,
-            "year_of_passing": student.year_of_passing,
-            "skills": student.skills,
-            "profile_photo": student.profile_photo,
-            "status": student.status,
-        }
-        for student in students
-    ]
+    if search.strip():
+        search_term = f"%{search.strip()}%"
+
+        query = query.filter(
+            or_(
+                models.Student.full_name.ilike(search_term),
+                models.Student.email.ilike(search_term),
+                models.Student.phone.ilike(search_term),
+                models.Student.department.ilike(search_term),
+            )
+        )
+
+    total_students = query.count()
+
+    students = (
+        query
+        .order_by(models.Student.id.asc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    total_pages = (total_students + limit - 1) // limit
+
+    return {
+        "students": [
+            {
+                "id": student.id,
+                "full_name": student.full_name,
+                "email": student.email,
+                "phone": student.phone,
+                "qualification": student.qualification,
+                "department": student.department,
+                "year_of_passing": student.year_of_passing,
+                "skills": student.skills,
+                "profile_photo": student.profile_photo,
+                "status": student.status,
+            }
+            for student in students
+        ],
+        "total_students": total_students,
+        "total_pages": total_pages,
+        "current_page": page,
+        "limit": limit,
+    }
 
 @app.get("/employee/students/status-history")
 def get_student_status_history(

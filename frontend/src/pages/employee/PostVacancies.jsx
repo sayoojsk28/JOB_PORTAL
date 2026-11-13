@@ -30,11 +30,16 @@ function PostVacancies() {
     try {
       setLoading(true);
 
-      const response = await api.get('/vacancies');
+      const response = await api.get('/vacancies', {
+        params: {
+    page: 1,
+    limit: 1000,
+        },
+      });
 
-      const vacancy = response.data.find(
-        (item) => item.id === Number(vacancyId)
-      );
+      const vacancy = response.data.vacancies.find(
+          (item) => item.id === Number(vacancyId)
+        );
 
       if (!vacancy) {
         setError('Vacancy not found.');

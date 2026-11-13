@@ -5,16 +5,34 @@ import api from '../../services/api';
 
 function ViewVacancies() {
   const navigate = useNavigate();
+
   const [vacancies, setVacancies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
 
+  const [page, setPage] = useState(1);
+  const [totalVacancies, setTotalVacancies] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
   useEffect(() => {
     const fetchVacancies = async () => {
       try {
-        const response = await api.get('/vacancies');
-        setVacancies(response.data);
+        setLoading(true);
+        setError('');
+
+        const response = await api.get('/vacancies', {
+          params: {
+            page,
+            limit: 10,
+            search,
+          },
+        });
+
+        setVacancies(response.data.vacancies);
+        setTotalVacancies(response.data.total_vacancies);
+        setTotalPages(response.data.total_pages);
+
       } catch (err) {
         setError(
           err.response?.data?.detail ||
@@ -26,23 +44,20 @@ function ViewVacancies() {
     };
 
     fetchVacancies();
-  }, []);
+  }, [page, search]);
 
-  const filteredVacancies = vacancies.filter((vacancy) => {
-    const searchText = search.toLowerCase();
+  const handleSearch = (value) => {
+    setSearch(value);
+    setPage(1);
+  };
 
-    return [
-      vacancy.title,
-      vacancy.location,
-      vacancy.required_skills,
-      vacancy.qualification,
-      vacancy.employment_type,
-    ].some((value) =>
-      String(value || '').toLowerCase().includes(searchText)
-    );
-  });
+  const startIndex = totalVacancies === 0
+    ? 0
+    : (page - 1) * 10 + 1;
 
-  if (loading) {
+  const endIndex = Math.min(page * 10, totalVacancies);
+
+  if (loading && vacancies.length === 0) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <p className="text-sm font-medium text-slate-500">
@@ -52,7 +67,7 @@ function ViewVacancies() {
     );
   }
 
-  if (error) {
+  if (error && vacancies.length === 0) {
     return (
       <div className="min-h-screen bg-slate-50 p-6">
         <p className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-600">
@@ -108,7 +123,7 @@ function ViewVacancies() {
                   Available vacancies
                 </p>
                 <p className="text-xl font-bold text-slate-900">
-                  {vacancies.length}
+                  {totalVacancies}
                 </p>
               </div>
             </div>
@@ -144,15 +159,19 @@ function ViewVacancies() {
               id="vacancy-search"
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => handleSearch(e.target.value)}
               placeholder="Search by job title, location, skills..."
               className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"
             />
           </div>
         </div>
 
+        {error && (
+          <p className="mb-4 text-sm text-red-600">{error}</p>
+        )}
+
         {/* Empty state */}
-        {vacancies.length === 0 ? (
+        {totalVacancies === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
               <svg
@@ -179,20 +198,15 @@ function ViewVacancies() {
             </div>
 
             <h2 className="text-lg font-semibold text-slate-800">
-              No vacancies available yet
+              {search
+                ? 'No matching vacancies'
+                : 'No vacancies available yet'}
             </h2>
 
             <p className="mt-2 text-sm text-slate-500">
-              New job opportunities will appear here when companies post them.
-            </p>
-          </div>
-        ) : filteredVacancies.length === 0 ? (
-          <div className="rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center">
-            <h2 className="text-lg font-semibold text-slate-800">
-              No matching vacancies
-            </h2>
-            <p className="mt-2 text-sm text-slate-500">
-              Try another job title, skill, or location.
+              {search
+                ? 'Try another job title, skill, or location.'
+                : 'New job opportunities will appear here when companies post them.'}
             </p>
           </div>
         ) : (
@@ -203,13 +217,13 @@ function ViewVacancies() {
               </h2>
 
               <p className="text-sm text-slate-500">
-                {filteredVacancies.length} result(s)
+                {totalVacancies} result(s)
               </p>
             </div>
 
             {/* Job cards */}
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-              {filteredVacancies.map((vacancy) => (
+              {vacancies.map((vacancy) => (
                 <article
                   key={vacancy.id}
                   className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-1 hover:border-blue-200 hover:shadow-xl hover:shadow-slate-200/60"
@@ -274,17 +288,6 @@ function ViewVacancies() {
                       </span>
                     </div>
 
-                    {/* Description
-                    <div className="mt-5 border-t border-slate-100 pt-4">
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                        About the role
-                      </p>
-
-                      <p className="whitespace-pre-line text-sm leading-6 text-slate-600">
-                        {vacancy.description || 'No description provided.'}
-                      </p>
-                    // </div> */}
-
                     {/* Skills */}
                     {vacancy.required_skills && (
                       <div className="mt-4">
@@ -330,26 +333,62 @@ function ViewVacancies() {
                       </div>
                     </div>
 
+                    {/* Edit button */}
                     <div className="mt-5 border-t border-slate-100 pt-4">
-  <p className="text-xs text-slate-400">
-    Vacancy ID: {vacancy.id}
-  </p>
+                      <p className="text-xs text-slate-400">
+                        Vacancy ID: {vacancy.id}
+                      </p>
 
-  <button
-    onClick={() =>
-      navigate(`/employee/vacancies/${vacancy.id}/edit`)
-    }
-    className="mt-4 w-full rounded-xl bg-blue-800 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-800"
-  >
-    Edit Details
-  </button>
-</div>
+                      <button
+                        onClick={() =>
+                          navigate(`/employee/vacancies/${vacancy.id}/edit`)
+                        }
+                        className="mt-4 w-full rounded-xl bg-blue-800 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-900"
+                      >
+                        Edit Details
+                      </button>
+                    </div>
+
                   </div>
                 </article>
               ))}
             </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="mt-8 flex flex-col items-center justify-between gap-4 sm:flex-row">
+
+                <p className="text-sm text-slate-500">
+                  Showing {startIndex}–{endIndex} of {totalVacancies} vacancies
+                </p>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setPage((prev) => prev - 1)}
+                    disabled={page === 1 || loading}
+                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+
+                  <span className="text-sm font-medium text-slate-600">
+                    Page {page} of {totalPages}
+                  </span>
+
+                  <button
+                    onClick={() => setPage((prev) => prev + 1)}
+                    disabled={page === totalPages || loading}
+                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+
+              </div>
+            )}
           </>
         )}
+
       </div>
     </div>
   );

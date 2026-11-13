@@ -9,11 +9,28 @@ const ViewStudents = () => {
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
 
+  const [page, setPage] = useState(1);
+  const [totalStudents, setTotalStudents] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
   useEffect(() => {
     const fetchStudents = async () => {
       try {
-        const response = await api.get('/employee/students/active');
-        setStudents(response.data);
+        setLoading(true);
+        setError('');
+
+        const response = await api.get('/employee/students/active', {
+          params: {
+            page,
+            limit: 20,
+            search: searchTerm,
+          },
+        });
+
+        setStudents(response.data.students);
+        setTotalStudents(response.data.total_students);
+        setTotalPages(response.data.total_pages);
+
       } catch (error) {
         console.error('Failed to fetch students:', error);
         setError(
@@ -25,20 +42,20 @@ const ViewStudents = () => {
     };
 
     fetchStudents();
-  }, []);
+  }, [page, searchTerm]);
 
-  const filteredStudents = students.filter((student) => {
-    const search = searchTerm.toLowerCase();
+  const handleSearch = (value) => {
+    setSearchTerm(value);
+    setPage(1);
+  };
 
-    return (
-      student.full_name?.toLowerCase().includes(search) ||
-      student.email?.toLowerCase().includes(search) ||
-      student.phone?.toLowerCase().includes(search) ||
-      student.department?.toLowerCase().includes(search)
-    );
-  });
+  const startIndex = totalStudents === 0
+    ? 0
+    : (page - 1) * 20 + 1;
 
-  if (loading) {
+  const endIndex = Math.min(page * 20, totalStudents);
+
+  if (loading && students.length === 0) {
     return (
       <main className="min-h-screen bg-slate-50 p-8 text-center">
         <p className="text-slate-500">Loading students...</p>
@@ -46,7 +63,7 @@ const ViewStudents = () => {
     );
   }
 
-  if (error) {
+  if (error && students.length === 0) {
     return (
       <main className="min-h-screen bg-slate-50 p-8 text-center">
         <p className="text-red-600">{error}</p>
@@ -79,11 +96,15 @@ const ViewStudents = () => {
           <input
             type="text"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => handleSearch(e.target.value)}
             placeholder="Search by name, email, phone or department..."
             className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 sm:max-w-md"
           />
         </div>
+
+        {error && (
+          <p className="mb-4 text-sm text-red-600">{error}</p>
+        )}
 
         <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full min-w-[1000px] text-left text-sm">
@@ -102,7 +123,7 @@ const ViewStudents = () => {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {filteredStudents.map((student) => (
+              {students.map((student) => (
                 <tr key={student.id} className="hover:bg-slate-50">
                   <td className="px-5 py-4">{student.id}</td>
 
@@ -125,22 +146,69 @@ const ViewStudents = () => {
                       {student.status}
                     </span>
                   </td>
+
                   <td className="px-5 py-4">
-  <Link to={`/employee/students/${student.id}`}>
-    View Profile
-  </Link>
-</td>
+                    <Link
+                      to={`/employee/students/${student.id}`}
+                      className="font-semibold text-blue-600 hover:text-blue-800"
+                    >
+                      View Profile
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
 
-          {filteredStudents.length === 0 && (
+          {loading && students.length > 0 && (
+            <p className="py-4 text-center text-sm text-slate-500">
+              Loading students...
+            </p>
+          )}
+
+          {!loading && students.length === 0 && (
             <p className="py-10 text-center text-slate-500">
               No active students found.
             </p>
           )}
         </div>
+
+        {totalStudents > 0 && (
+          <div className="mt-5 flex flex-col items-center justify-between gap-4 sm:flex-row">
+
+            <p className="text-sm text-slate-500">
+              Showing {startIndex}–{endIndex} of {totalStudents} students
+            </p>
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-3">
+
+                <button
+                  onClick={() => setPage((prev) => prev - 1)}
+                  disabled={page === 1 || loading}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Previous
+                </button>
+
+                <span className="text-sm font-medium text-slate-600">
+                  Page {page} of {totalPages}
+                </span>
+
+                <button
+                  onClick={() => setPage((prev) => prev + 1)}
+                  disabled={page === totalPages || loading}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                </button>
+
+              </div>
+            )}
+
+          </div>
+        )}
+
       </div>
     </main>
   );
