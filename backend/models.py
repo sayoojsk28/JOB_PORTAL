@@ -432,8 +432,8 @@ class EmployeeNotification(Base):
         ),
         UniqueConstraint(
     "employee_id",
-    "training_course_id",
-    name="uq_employee_training_course_notification"
+    "mock_interview_id",
+    name="uq_employee_mock_interview_notification"
 )
     )
 
@@ -452,6 +452,12 @@ class EmployeeNotification(Base):
     training_course_id = Column(
     Integer,
     ForeignKey("training_courses.id"),
+    nullable=True,
+    index=True
+)
+    mock_interview_id = Column(
+    Integer,
+    ForeignKey("mock_interviews.id"),
     nullable=True,
     index=True
 )
@@ -1184,5 +1190,129 @@ class TrainingCourseSubmission(Base):
     )
 
     generated_at = Column(DateTime, nullable=True)
+
+
+
+class MockInterview(Base):
+    __tablename__ = "mock_interviews"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "enrollment_id",
+            "attempt_number",
+            name="uq_mock_interview_enrollment_attempt"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    enrollment_id = Column(
+        Integer,
+        ForeignKey("training_enrollments.id"),
+        nullable=False,
+        index=True
+    )
+
+    attempt_number = Column(
+        Integer,
+        nullable=False
+    )
+
+    status = Column(
+        String(20),
+        nullable=False,
+        default="In Progress",
+        server_default=text("'In Progress'")
+    )
+
+    total_score = Column(Float, nullable=True)
+
+    passing_score = Column(
+        Float,
+        nullable=False
+    )
+
+    started_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now()
+    )
+
+    completed_at = Column(DateTime, nullable=True)
+
+    result_published = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false")
+    )
+
+    published_by = Column(
+        Integer,
+        ForeignKey("employees.id"),
+        nullable=True
+    )
+
+    published_at = Column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+
+class MockInterviewQuestion(Base):
+    __tablename__ = "mock_interview_questions"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "interview_id",
+            "question_number",
+            name="uq_mock_interview_question_number"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    interview_id = Column(
+        Integer,
+        ForeignKey("mock_interviews.id"),
+        nullable=False,
+        index=True
+    )
+
+    question_number = Column(Integer, nullable=False)
+
+    question_type = Column(
+        String(30),
+        nullable=False
+    )
+
+    question_text = Column(Text, nullable=False)
+
+    answer_transcript = Column(Text, nullable=True)
+
+    correctness_score = Column(Float, nullable=True)
+
+    score = Column(Float, nullable=True)
+
+    first_response_seconds = Column(Float, nullable=True)
+
+    answer_duration_seconds = Column(Float, nullable=True)
+
+    total_pause_seconds = Column(Float, nullable=True)
+
+    longest_pause_seconds = Column(Float, nullable=True)
+
+    repetition_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    feedback = Column(Text, nullable=True)
+
+    evaluation_result = Column(JSON, nullable=True)
+
+    answered_at = Column(DateTime, nullable=True)
 
 

@@ -59,6 +59,7 @@ import StudentProfile from '../pages/employee/StudentProfile';
 import CourseConfiguration from '../pages/employee/CourseConfiguration';
 import TrainingEligibleStudents from '../pages/employee/TrainingEligibleStudents';
 import EmployeeEditDetails from '../pages/employee/EmployeeEditDetails';
+import MockInterview from '../pages/student/MockInterview';
 
 const AppRoutes = () => {
   return (
@@ -229,6 +230,10 @@ const AppRoutes = () => {
             path="/student/training-courses/:courseId"
             element={<StudentCourseQuestionnaire />}
           />
+          <Route
+  path="/student/training-courses/:courseId/mock-interview"
+  element={<MockInterview />}
+/>
 
         </Route>
 

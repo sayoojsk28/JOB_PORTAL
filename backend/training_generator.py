@@ -196,6 +196,138 @@ Return exactly 5 strings in the questions array.
     return all_questions
 
 
+def generate_mock_interview_questions(
+    job_role: str,
+    course_type: str,
+    resume_texts: list[str]
+) -> list[str]:
+
+    import json
+    import ollama
+
+    combined_resumes = "\n\n".join(
+        f"Candidate Resume {index + 1}:\n{text}"
+        for index, text in enumerate(resume_texts)
+        if text and text.strip()
+    )
+
+    if not job_role or not job_role.strip():
+        raise ValueError("Invalid job role")
+
+    if course_type not in ["Coding", "Non-Coding"]:
+        raise ValueError("Invalid course type")
+
+    if not combined_resumes.strip():
+        raise ValueError("No resume information available")
+
+    coding_instruction = (
+        "Include technical problem-solving, coding concepts, "
+        "debugging and practical implementation where relevant."
+        if course_type == "Coding"
+        else
+        "Focus on job-role knowledge, practical skills and "
+        "workplace scenarios. Do not ask coding questions."
+    )
+
+    prompt = f"""
+You are an experienced technical interviewer conducting
+a real company mock interview.
+
+Generate exactly 5 technical interview questions.
+
+Job Role:
+{job_role}
+
+Course Type:
+{course_type}
+
+Candidate Resume:
+{combined_resumes}
+
+Requirements:
+
+1. Questions must be based on the candidate's actual resume.
+2. Focus on technical skills, projects and practical experience.
+3. Questions must require reasoning and descriptive answers.
+4. Prefer questions that test actual understanding.
+5. Include practical scenarios where appropriate.
+6. Do not invent skills, projects or work experience.
+7. Do not generate definition-only questions.
+8. Do not generate MCQs, answers or explanations.
+9. Do not repeat questions.
+10. Each question must be suitable for a spoken interview.
+11. {coding_instruction}
+
+Return only valid JSON:
+
+{{
+    "questions": [
+        "Question 1",
+        "Question 2",
+        "Question 3",
+        "Question 4",
+        "Question 5"
+    ]
+}}
+
+Return exactly 5 questions.
+"""
+
+    last_error = None
+
+    for attempt in range(3):
+        try:
+            response = ollama.chat(
+                model="llama3.2:latest",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                format="json",
+                options={
+                    "temperature": 0.3,
+                    "num_predict": 1200
+                }
+            )
+
+            result = json.loads(
+                response["message"]["content"].strip()
+            )
+
+            questions = result.get("questions")
+
+            if not isinstance(questions, list) or len(questions) != 5:
+                raise ValueError(
+                    "AI must generate exactly 5 questions"
+                )
+
+            cleaned_questions = []
+
+            for question in questions:
+                if not isinstance(question, str) or not question.strip():
+                    raise ValueError("Invalid question generated")
+
+                cleaned_questions.append(question.strip())
+
+            if len({
+                question.casefold()
+                for question in cleaned_questions
+            }) != 5:
+                raise ValueError("Duplicate questions generated")
+
+            return cleaned_questions
+
+        except Exception as error:
+            last_error = error
+
+    raise ValueError(
+        f"Mock interview question generation failed: {str(last_error)}"
+    )
+
+
+
 
 def generate_training_submission_pdf(
     job_role: str,
@@ -700,3 +832,135 @@ Remember:
 
     return analysis_text
 
+
+def evaluate_mock_interview_answer(
+    question: str,
+    answer: str,
+    job_role: str,
+    course_type: str
+) -> dict:
+
+    if not question.strip():
+        raise ValueError("Question cannot be empty")
+
+    if not answer.strip():
+        raise ValueError("Answer cannot be empty")
+
+    prompt = f"""
+You are an experienced technical interviewer.
+
+Evaluate the candidate's answer objectively.
+
+Job Role:
+{job_role}
+
+Course Type:
+{course_type}
+
+Interview Question:
+{question}
+
+Candidate's Answer:
+{answer}
+
+Evaluation criteria:
+
+1. Technical correctness (0-40):
+Evaluate whether the technical information is accurate.
+
+2. Relevance (0-20):
+Evaluate how directly the answer addresses the question.
+
+3. Technical understanding and depth (0-20):
+Evaluate practical understanding, reasoning and depth.
+
+4. Explanation clarity (0-10):
+Evaluate whether the explanation is understandable and logically structured.
+
+Important rules:
+
+- Evaluate the meaning and intent of the complete answer.
+- Do not penalize hesitation, repeated words or self-correction
+  when they do not affect the actual answer.
+- Do not assume missing skills or experience.
+- Do not reward incorrect technical claims.
+- Accept technically valid alternative approaches.
+- Do not expect an advanced answer from a junior candidate
+  when a correct basic explanation is sufficient.
+- If the candidate says "I don't know", evaluate the answer
+  honestly without inventing knowledge.
+- Never infer personality, intelligence or mental state.
+
+Return ONLY valid JSON:
+
+{{
+    "technical_correctness": 0,
+    "relevance": 0,
+    "technical_depth": 0,
+    "explanation_clarity": 0,
+    "feedback": "Specific feedback explaining strengths and weaknesses"
+}}
+
+All scores must be numeric and within their respective limits.
+"""
+
+    last_error = None
+
+    for attempt in range(3):
+        try:
+            response = ollama.chat(
+                model="llama3.2:latest",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                format="json",
+                options={
+                    "temperature": 0.1,
+                    "num_predict": 700
+                }
+            )
+
+            result = json.loads(
+                response["message"]["content"].strip()
+            )
+
+            score_limits = {
+                "technical_correctness": 40,
+                "relevance": 20,
+                "technical_depth": 20,
+                "explanation_clarity": 10
+            }
+
+            for key, maximum in score_limits.items():
+                value = result.get(key)
+
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not 0 <= value <= maximum
+                ):
+                    raise ValueError(
+                        f"Invalid score for {key}"
+                    )
+
+            feedback = result.get("feedback")
+
+            if not isinstance(feedback, str) or not feedback.strip():
+                raise ValueError("Invalid evaluation feedback")
+
+            result["ai_score"] = round(
+                sum(result[key] for key in score_limits),
+                2
+            )
+
+            return result
+
+        except Exception as error:
+            last_error = error
+
+    raise ValueError(
+        f"Mock interview evaluation failed: {str(last_error)}"
+    )

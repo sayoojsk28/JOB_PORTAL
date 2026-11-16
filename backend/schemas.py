@@ -386,3 +386,14 @@ class TrainingExamResult(BaseModel):
     total_questions: int = 50
     passed: bool
     status: str
+
+
+class MockInterviewAnswerSubmit(BaseModel):
+    answer_transcript: str = Field(min_length=1, max_length=10000)
+
+    first_response_seconds: float = Field(default=0, ge=0)
+    answer_duration_seconds: float = Field(default=0, ge=0)
+    total_pause_seconds: float = Field(default=0, ge=0)
+    longest_pause_seconds: float = Field(default=0, ge=0)
+
+    repetition_count: int = Field(default=0, ge=0)

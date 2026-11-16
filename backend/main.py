@@ -42,6 +42,7 @@ from schemas import (
     TrainingCourseCreate,
     InterviewAnalysisCreate,
     VacancyUpdate,
+    MockInterviewAnswerSubmit,
 )
 
 import os
@@ -78,7 +79,9 @@ from xml.sax.saxutils import escape
 from training_generator import (
     generate_course_questionnaire,
        analyze_training_questionnaire_with_ai,
-    generate_training_submission_pdf
+    generate_training_submission_pdf,
+    generate_mock_interview_questions,
+    evaluate_mock_interview_answer,
 )
 os.makedirs("uploads/employee_photos", exist_ok=True)
 
@@ -7446,4 +7449,801 @@ def get_student_training_course_submission(
         "status": submission.status,
         "pdf_url": f"/student/training-course-submissions/{submission.id}/pdf"
     }
+
+
+@app.post("/student/training-courses/{course_id}/mock-interviews/start")
+def start_mock_interview(
+    course_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    try:
+        # 1. Verify and lock active enrollment
+        enrollment = (
+            db.query(models.TrainingEnrollment)
+            .filter(
+                models.TrainingEnrollment.course_id == course_id,
+                models.TrainingEnrollment.student_id == student.id,
+            )
+            .with_for_update()
+            .first()
+        )
+
+        if not enrollment:
+            raise HTTPException(
+                status_code=404,
+                detail="Training enrollment not found."
+            )
+
+        if enrollment.status != "Active":
+            raise HTTPException(
+                status_code=409,
+                detail="Training enrollment is not active."
+            )
+
+        # 2. Verify approved eligibility
+        eligibility = (
+            db.query(models.TrainingEligibility)
+            .filter(
+                models.TrainingEligibility.id == enrollment.eligibility_id,
+                models.TrainingEligibility.status == "Approved"
+            )
+            .first()
+        )
+
+        if not eligibility:
+            raise HTTPException(
+                status_code=409,
+                detail="Training eligibility is not approved."
+            )
+
+        # 3. Get active course
+        course = (
+            db.query(models.TrainingCourse)
+            .filter(
+                models.TrainingCourse.id == course_id,
+                models.TrainingCourse.status == "Active"
+            )
+            .first()
+        )
+
+        if not course:
+            raise HTTPException(
+                status_code=404,
+                detail="Active training course not found."
+            )
+
+        # 4. Verify generated PDF
+        submission = (
+            db.query(models.TrainingCourseSubmission)
+            .filter(
+                models.TrainingCourseSubmission.enrollment_id
+                == enrollment.id,
+                models.TrainingCourseSubmission.status == "Generated"
+            )
+            .first()
+        )
+
+        if not submission:
+            raise HTTPException(
+                status_code=409,
+                detail="Please generate your course PDF first."
+            )
+
+        # 5. Prevent another interview if already passed
+        passed_interview = (
+            db.query(models.MockInterview)
+            .filter(
+                models.MockInterview.enrollment_id == enrollment.id,
+                models.MockInterview.status == "Passed"
+            )
+            .first()
+        )
+
+        if passed_interview:
+            raise HTTPException(
+                status_code=409,
+                detail="You have already passed the mock interview."
+            )
+
+        # 6. Prevent duplicate active attempts
+        active_interview = (
+            db.query(models.MockInterview)
+            .filter(
+                models.MockInterview.enrollment_id == enrollment.id,
+                models.MockInterview.status == "In Progress"
+            )
+            .first()
+        )
+
+        if active_interview:
+            raise HTTPException(
+                status_code=409,
+                detail="A mock interview is already in progress."
+            )
+
+        # 7. Retrieve resumes linked to this course
+        resumes = (
+            db.query(models.Resume)
+            .join(
+                models.Application,
+                models.Application.resume_id
+                == models.Resume.resume_id
+            )
+            .join(
+                models.TrainingCourseApplication,
+                models.TrainingCourseApplication.application_id
+                == models.Application.application_id
+            )
+            .filter(
+                models.TrainingCourseApplication.course_id == course_id,
+                models.Application.student_id == student.id,
+                models.Resume.student_id == student.id
+            )
+            .all()
+        )
+
+        if not resumes:
+            raise HTTPException(
+                status_code=409,
+                detail="No resumes are linked to this training course."
+            )
+
+        # 8. Extract resume information
+        resume_texts = []
+        processed_resume_ids = set()
+
+        for resume in resumes:
+
+            if resume.resume_id in processed_resume_ids:
+                continue
+
+            processed_resume_ids.add(resume.resume_id)
+
+            if resume.extracted_text and resume.extracted_text.strip():
+                resume_text = resume.extracted_text.strip()
+            else:
+                resume_text = extract_resume_text(resume.file_path)
+
+            if resume_text and resume_text.strip():
+                resume_texts.append(resume_text)
+
+        if not resume_texts:
+            raise HTTPException(
+                status_code=409,
+                detail="No readable resume information is available."
+            )
+
+        # 9. Generate 5 resume-based technical questions
+        try:
+            technical_questions = generate_mock_interview_questions(
+                job_role=course.job_role,
+                course_type=course.course_type,
+                resume_texts=resume_texts
+            )
+        except Exception as ai_error:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Mock interview question generation failed: "
+                    f"{str(ai_error)}"
+                )
+            )
+
+        # 10. Calculate next attempt number
+        last_attempt = (
+            db.query(models.MockInterview)
+            .filter(
+                models.MockInterview.enrollment_id == enrollment.id
+            )
+            .order_by(
+                models.MockInterview.attempt_number.desc()
+            )
+            .first()
+        )
+
+        attempt_number = (
+            last_attempt.attempt_number + 1
+            if last_attempt else 1
+        )
+
+        # 11. Create interview attempt
+        interview = models.MockInterview(
+            enrollment_id=enrollment.id,
+            attempt_number=attempt_number,
+            status="In Progress",
+            passing_score=70.0
+        )
+
+        db.add(interview)
+        db.flush()
+
+        # 12. Add introduction question
+        introduction_question = models.MockInterviewQuestion(
+            interview_id=interview.id,
+            question_number=1,
+            question_type="Introduction",
+            question_text=(
+                "Tell me about yourself and briefly introduce "
+                "your educational background, skills, and "
+                "professional interests."
+            )
+        )
+
+        db.add(introduction_question)
+
+        # 13. Save 5 technical questions
+        for question_number, question_text in enumerate(
+            technical_questions,
+            start=2
+        ):
+            db.add(
+                models.MockInterviewQuestion(
+                    interview_id=interview.id,
+                    question_number=question_number,
+                    question_type="Technical",
+                    question_text=question_text
+                )
+            )
+
+        # 14. Log interview creation
+        log_action(
+            db=db,
+            user_id=student.user_id,
+            action="MOCK_INTERVIEW_STARTED",
+            target_type="mock_interview",
+            target_id=interview.id,
+            details=(
+                f"Mock interview attempt {attempt_number} "
+                f"started for {course.job_role}"
+            ),
+        )
+
+        db.commit()
+        db.refresh(interview)
+        db.refresh(introduction_question)
+
+        return {
+            "message": "Mock interview started successfully.",
+            "interview_id": interview.id,
+            "attempt_number": interview.attempt_number,
+            "status": interview.status,
+            "passing_score": interview.passing_score,
+            "total_questions": 6,
+            "current_question": {
+                "question_id": introduction_question.id,
+                "question_number": introduction_question.question_number,
+                "question_type": introduction_question.question_type,
+                "question_text": introduction_question.question_text
+            }
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start mock interview: {str(e)}"
+        )
+
+
+@app.get(
+    "/student/training-courses/{course_id}/mock-interviews/active"
+)
+def get_active_mock_interview(
+    course_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    # 1. Verify student enrollment
+    enrollment = (
+        db.query(models.TrainingEnrollment)
+        .filter(
+            models.TrainingEnrollment.course_id == course_id,
+            models.TrainingEnrollment.student_id == student.id,
+        )
+        .first()
+    )
+
+    if not enrollment:
+        raise HTTPException(
+            status_code=404,
+            detail="Training enrollment not found."
+        )
+
+    # 2. Find active interview
+    interview = (
+        db.query(models.MockInterview)
+        .filter(
+            models.MockInterview.enrollment_id == enrollment.id,
+            models.MockInterview.status == "In Progress"
+        )
+        .order_by(
+            models.MockInterview.attempt_number.desc()
+        )
+        .first()
+    )
+
+    # No active interview
+    if not interview:
+        return {
+            "exists": False,
+            "interview": None
+        }
+
+    # 3. Retrieve all questions
+    questions = (
+        db.query(models.MockInterviewQuestion)
+        .filter(
+            models.MockInterviewQuestion.interview_id
+            == interview.id
+        )
+        .order_by(
+            models.MockInterviewQuestion.question_number
+        )
+        .all()
+    )
+
+    # 4. Find current unanswered question
+    current_question = next(
+        (
+            question for question in questions
+            if not question.answer_transcript
+            or not question.answer_transcript.strip()
+        ),
+        None
+    )
+
+    completed_questions = sum(
+        1 for question in questions
+        if question.answer_transcript
+        and question.answer_transcript.strip()
+    )
+
+    # 5. Return interview progress
+    return {
+        "exists": True,
+        "interview": {
+            "interview_id": interview.id,
+            "attempt_number": interview.attempt_number,
+            "status": interview.status,
+            "passing_score": interview.passing_score,
+            "total_score": interview.total_score,
+            "total_questions": len(questions),
+            "completed_questions": completed_questions,
+            "evaluation_pending": current_question is None,
+            "current_question": (
+                {
+                    "question_id": current_question.id,
+                    "question_number": current_question.question_number,
+                    "question_type": current_question.question_type,
+                    "question_text": current_question.question_text
+                }
+                if current_question else None
+            ),
+            "questions": [
+                {
+                    "question_id": question.id,
+                    "question_number": question.question_number,
+                    "question_type": question.question_type,
+                    "question_text": question.question_text,
+                    "answer_transcript": question.answer_transcript,
+                    "answered": bool(
+                        question.answer_transcript
+                        and question.answer_transcript.strip()
+                    )
+                }
+                for question in questions
+            ]
+        }
+    }
+
+
+@app.post(
+    "/student/mock-interviews/{interview_id}/questions/{question_id}/answer"
+)
+def submit_mock_interview_answer(
+    interview_id: int,
+    question_id: int,
+    answer: MockInterviewAnswerSubmit,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    try:
+        # 1. Verify that this interview belongs to the student
+        interview = (
+            db.query(models.MockInterview)
+            .join(
+                models.TrainingEnrollment,
+                models.MockInterview.enrollment_id
+                == models.TrainingEnrollment.id
+            )
+            .filter(
+                models.MockInterview.id == interview_id,
+                models.TrainingEnrollment.student_id == student.id,
+            )
+            .with_for_update()
+            .first()
+        )
+
+        if not interview:
+            raise HTTPException(
+                status_code=404,
+                detail="Mock interview not found."
+            )
+
+        if interview.status != "In Progress":
+            raise HTTPException(
+                status_code=409,
+                detail="This mock interview is not in progress."
+            )
+
+        # 2. Get the next unanswered question
+        current_question = (
+            db.query(models.MockInterviewQuestion)
+            .filter(
+                models.MockInterviewQuestion.interview_id
+                == interview.id,
+                models.MockInterviewQuestion.answer_transcript.is_(None)
+            )
+            .order_by(
+                models.MockInterviewQuestion.question_number
+            )
+            .first()
+        )
+
+        if not current_question:
+            raise HTTPException(
+                status_code=409,
+                detail="All interview questions have already been answered."
+            )
+
+        # 3. Prevent skipping or answering another question
+        if current_question.id != question_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Please answer the current question first."
+            )
+
+        # 4. Validate the answer
+        answer_text = answer.answer_transcript.strip()
+
+        if not answer_text:
+            raise HTTPException(
+                status_code=422,
+                detail="Answer cannot be empty."
+            )
+
+        # 5. Save the student's answer
+        current_question.answer_transcript = answer_text
+
+        current_question.first_response_seconds = (
+            answer.first_response_seconds
+        )
+
+        current_question.answer_duration_seconds = (
+            answer.answer_duration_seconds
+        )
+
+        current_question.total_pause_seconds = (
+            answer.total_pause_seconds
+        )
+
+        current_question.longest_pause_seconds = (
+            answer.longest_pause_seconds
+        )
+
+        current_question.repetition_count = (
+            answer.repetition_count
+        )
+
+        current_question.answered_at = datetime.now()
+
+        # 6. Find the next question
+        next_question = (
+            db.query(models.MockInterviewQuestion)
+            .filter(
+                models.MockInterviewQuestion.interview_id
+                == interview.id,
+                models.MockInterviewQuestion.question_number
+                > current_question.question_number
+            )
+            .order_by(
+                models.MockInterviewQuestion.question_number
+            )
+            .first()
+        )
+
+        # 7. Save everything
+        db.commit()
+
+        if next_question:
+            return {
+                "message": "Answer submitted successfully.",
+                "interview_id": interview.id,
+                "completed_questions": current_question.question_number,
+                "total_questions": 6,
+                "evaluation_pending": False,
+                "next_question": {
+                    "question_id": next_question.id,
+                    "question_number": next_question.question_number,
+                    "question_type": next_question.question_type,
+                    "question_text": next_question.question_text
+                }
+            }
+
+        # All six questions are answered
+        return {
+            "message": "All interview questions answered successfully.",
+            "interview_id": interview.id,
+            "completed_questions": 6,
+            "total_questions": 6,
+            "evaluation_pending": True
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to submit interview answer: {str(e)}"
+        )
+
+
+
+@app.post("/student/mock-interviews/{interview_id}/evaluate")
+def evaluate_mock_interview(
+    interview_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    try:
+        # 1. Verify interview ownership and lock the interview
+        interview = (
+            db.query(models.MockInterview)
+            .join(
+                models.TrainingEnrollment,
+                models.MockInterview.enrollment_id
+                == models.TrainingEnrollment.id
+            )
+            .filter(
+                models.MockInterview.id == interview_id,
+                models.TrainingEnrollment.student_id == student.id,
+            )
+            .with_for_update()
+            .first()
+        )
+
+        if not interview:
+            raise HTTPException(
+                status_code=404,
+                detail="Mock interview not found."
+            )
+
+        if interview.status != "In Progress":
+            raise HTTPException(
+                status_code=409,
+                detail="This interview has already been evaluated or is not in progress."
+            )
+
+        # 2. Retrieve the associated training course
+        enrollment = (
+            db.query(models.TrainingEnrollment)
+            .filter(
+                models.TrainingEnrollment.id
+                == interview.enrollment_id
+            )
+            .first()
+        )
+
+        if not enrollment:
+            raise HTTPException(
+                status_code=404,
+                detail="Training enrollment not found."
+            )
+
+        course = (
+            db.query(models.TrainingCourse)
+            .filter(
+                models.TrainingCourse.id == enrollment.course_id
+            )
+            .first()
+        )
+
+        if not course:
+            raise HTTPException(
+                status_code=404,
+                detail="Training course not found."
+            )
+
+        # 3. Retrieve all interview questions
+        questions = (
+            db.query(models.MockInterviewQuestion)
+            .filter(
+                models.MockInterviewQuestion.interview_id
+                == interview.id
+            )
+            .order_by(
+                models.MockInterviewQuestion.question_number
+            )
+            .all()
+        )
+
+        if len(questions) != 6:
+            raise HTTPException(
+                status_code=400,
+                detail="Interview must contain exactly 6 questions."
+            )
+
+        if any(
+            not question.answer_transcript
+            or not question.answer_transcript.strip()
+            for question in questions
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="All 6 questions must be answered before evaluation."
+            )
+
+        # 4. Evaluate every answer using Ollama
+        evaluation_results = []
+
+        for question in questions:
+
+            result = evaluate_mock_interview_answer(
+                question=question.question_text,
+                answer=question.answer_transcript,
+                job_role=course.job_role,
+                course_type=course.course_type
+            )
+
+            evaluation_results.append({
+                "question": question,
+                "result": result
+            })
+
+        # 5. Calculate the final score out of 100
+        total_ai_score = sum(
+            item["result"]["ai_score"]
+            for item in evaluation_results
+        )
+
+        average_ai_score = (
+            total_ai_score / len(evaluation_results)
+        )
+
+        final_score = round(
+            (average_ai_score / 90) * 100,
+            2
+        )
+
+        # 6. Save individual question evaluations
+        response_questions = []
+
+        for item in evaluation_results:
+
+            question = item["question"]
+            result = item["result"]
+
+            question.correctness_score = result[
+                "technical_correctness"
+            ]
+
+            question.score = round(
+                (result["ai_score"] / 90) * 100,
+                2
+            )
+
+            question.feedback = result["feedback"]
+
+            question.evaluation_result = result
+
+            response_questions.append({
+                "question_number": question.question_number,
+                "question_text": question.question_text,
+                "score": question.score,
+                "feedback": question.feedback,
+                "evaluation": result
+            })
+
+        # 7. Update the interview status
+        interview.total_score = final_score
+
+        interview.status = (
+            "Passed"
+            if final_score >= interview.passing_score
+            else "Failed"
+        )
+
+        interview.completed_at = datetime.now()
+
+        # 8. Keep the result unpublished
+        interview.result_published = False
+        interview.published_by = None
+        interview.published_at = None
+
+# Commit the evaluation
+        db.commit()
+
+        return {
+            "message": "Mock interview evaluation completed. Awaiting employee publication.",
+            "interview_id": interview.id,
+            "evaluation_status": "Completed",
+            "publication_status": "Pending"
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Mock interview evaluation failed: {str(e)}"
+        )
+
+
+
+@app.get("/employee/mock-interview-results")
+def get_mock_interview_results(
+    db: Session = Depends(get_db),
+    employee=Depends(require_employee),
+):
+    interviews = (
+        db.query(
+            models.MockInterview,
+            models.Student,
+            models.TrainingCourse,
+        )
+        .join(
+            models.TrainingEnrollment,
+            models.TrainingEnrollment.id
+            == models.MockInterview.enrollment_id
+        )
+        .join(
+            models.Student,
+            models.Student.id
+            == models.TrainingEnrollment.student_id
+        )
+        .join(
+            models.TrainingCourse,
+            models.TrainingCourse.id
+            == models.TrainingEnrollment.course_id
+        )
+        .filter(
+            models.TrainingCourse.created_by == employee.id,
+            models.MockInterview.status.in_(["Passed", "Failed"]),
+            models.MockInterview.result_published == False,
+        )
+        .order_by(
+            models.MockInterview.completed_at.desc()
+        )
+        .all()
+    )
+
+    return [
+        {
+            "interview_id": interview.id,
+            "student_id": student.id,
+            "student_name": student.full_name,
+            "student_email": student.email,
+            "course_id": course.id,
+            "job_role": course.job_role,
+            "course_type": course.course_type,
+            "attempt_number": interview.attempt_number,
+            "total_score": interview.total_score,
+            "passing_score": interview.passing_score,
+            "status": interview.status,
+            "completed_at": interview.completed_at,
+        }
+        for interview, student, course in interviews
+    ]
+
 

@@ -406,7 +406,17 @@ function StudentCourseQuestionnaire() {
                 <p className="mt-2 text-xs text-slate-500">
                   Submission ID: #{submissionId}
                 </p>
-
+                <button
+  type="button"
+  onClick={() =>
+    navigate(
+      `/student/training-courses/${courseId}/mock-interview`
+    )
+  }
+  className="mt-5 w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+>
+  Start Mock Interview →
+</button>
                 <button
                   type="button"
                   onClick={handleCompleteCourse}
