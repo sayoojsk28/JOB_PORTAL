@@ -60,6 +60,8 @@ import CourseConfiguration from '../pages/employee/CourseConfiguration';
 import TrainingEligibleStudents from '../pages/employee/TrainingEligibleStudents';
 import EmployeeEditDetails from '../pages/employee/EmployeeEditDetails';
 import MockInterview from '../pages/student/MockInterview';
+import StudentMockInterviewResults from '../pages/student/StudentMockInterviewResults';
+import EmployeeMockInterviewResults from '../pages/employee/EmployeeMockInterviewResults';
 
 const AppRoutes = () => {
   return (
@@ -190,6 +192,11 @@ const AppRoutes = () => {
             path="/student/interview-results"
             element={<ViewInterviewResults />}
           />
+
+          <Route
+  path="/student/mock-interview-results"
+  element={<StudentMockInterviewResults />}
+/>
 
           <Route
             path="/student/feedback"
@@ -356,6 +363,11 @@ const AppRoutes = () => {
             path="/employee/students/status-history"
             element={<StudentStatus />}
           />
+
+          <Route
+  path="/employee/mock-interview-results"
+  element={<EmployeeMockInterviewResults />}
+/>
 
           <Route
             path="/employee/students/:studentId"

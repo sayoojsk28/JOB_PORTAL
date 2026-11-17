@@ -17,6 +17,9 @@ function StudentCourseQuestionnaire() {
   const [pdfUrl, setPdfUrl] = useState('');
   const [submissionId, setSubmissionId] = useState(null);
   const [submissionExists, setSubmissionExists] = useState(false);
+  const [mockInterviewStatus, setMockInterviewStatus] = useState(null);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [statusError, setStatusError] = useState('');
 
   const [completing, setCompleting] = useState(false);
   const [completionError, setCompletionError] = useState('');
@@ -106,6 +109,46 @@ function StudentCourseQuestionnaire() {
     };
   }, [pdfUrl]);
 
+
+// Fetch latest mock interview status
+  useEffect(() => {
+  let cancelled = false;
+
+  const fetchMockInterviewStatus = async () => {
+    try {
+      setStatusLoading(true);
+      setStatusError('');
+
+      const response = await api.get(
+        `/student/training-courses/${courseId}/mock-interviews/status`
+      );
+
+      if (cancelled) return;
+
+      setMockInterviewStatus(response.data.status);
+
+    } catch (err) {
+      if (!cancelled) {
+        setStatusError(
+          err.response?.data?.detail ||
+          'Failed to load mock interview status.'
+        );
+      }
+    } finally {
+      if (!cancelled) {
+        setStatusLoading(false);
+      }
+    }
+  };
+
+  fetchMockInterviewStatus();
+
+  return () => {
+    cancelled = true;
+  };
+}, [courseId]);
+
+
   const handleAnswerChange = (questionId, value) => {
     setAnswers((previous) => ({
       ...previous,
@@ -122,6 +165,14 @@ function StudentCourseQuestionnaire() {
   const allAnswered =
     totalQuestions === 20 &&
     answeredQuestions === totalQuestions;
+
+  const canStartMockInterview =
+    !statusLoading &&
+    !statusError &&
+    (
+      mockInterviewStatus === 'Not Started' ||
+      mockInterviewStatus === 'Published - Failed'
+    );
 
   // Generate PDF
   const handleGeneratePDF = async () => {
@@ -406,17 +457,40 @@ function StudentCourseQuestionnaire() {
                 <p className="mt-2 text-xs text-slate-500">
                   Submission ID: #{submissionId}
                 </p>
-                <button
+                
+<button
   type="button"
   onClick={() =>
     navigate(
       `/student/training-courses/${courseId}/mock-interview`
     )
   }
-  className="mt-5 w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+  disabled={!canStartMockInterview}
+  className={`mt-5 w-full rounded-xl px-6 py-3 text-sm font-semibold transition ${
+    canStartMockInterview
+      ? 'bg-blue-600 text-white hover:bg-blue-700'
+      : 'cursor-not-allowed bg-slate-200 text-slate-500'
+  }`}
 >
-  Start Mock Interview →
+  {statusLoading
+    ? 'Checking Interview Status...'
+    : mockInterviewStatus === 'Published - Failed'
+      ? 'Start Mock Interview Again →'
+      : mockInterviewStatus === 'In Progress'
+        ? 'Interview In Progress'
+        : mockInterviewStatus === 'Awaiting Publication'
+          ? 'Awaiting Employee Review'
+          : mockInterviewStatus === 'Published - Passed'
+            ? 'Mock Interview Passed'
+            : 'Start Mock Interview →'}
 </button>
+
+{statusError && (
+  <p className="mt-3 text-sm text-red-600">
+    {statusError}
+  </p>
+)}
+
                 <button
                   type="button"
                   onClick={handleCompleteCourse}

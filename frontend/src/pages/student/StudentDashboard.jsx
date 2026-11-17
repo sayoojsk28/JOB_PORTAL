@@ -39,6 +39,12 @@ const dashboardCards = [
   icon: '📚',
   path: '/student/training-courses',
 },
+{
+  title: 'View Mock Interview Results',
+  description: 'View your published AI mock interview results, marks and detailed feedback.',
+  icon: '🎯',
+  path: '/student/mock-interview-results',
+},
   {
   title: 'Reset Password',
   description: 'Change your account password securely.',

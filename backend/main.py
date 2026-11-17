@@ -7842,6 +7842,216 @@ def get_active_mock_interview(
     }
 
 
+@app.get(
+    "/student/training-courses/{course_id}/mock-interviews/status"
+)
+def get_mock_interview_status(
+    course_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    # 1. Verify student enrollment
+    enrollment = (
+        db.query(models.TrainingEnrollment)
+        .filter(
+            models.TrainingEnrollment.course_id == course_id,
+            models.TrainingEnrollment.student_id == student.id,
+        )
+        .first()
+    )
+
+    if not enrollment:
+        raise HTTPException(
+            status_code=404,
+            detail="Training enrollment not found."
+        )
+
+    # 2. Find the latest mock interview
+    interview = (
+        db.query(models.MockInterview)
+        .filter(
+            models.MockInterview.enrollment_id == enrollment.id
+        )
+        .order_by(
+            models.MockInterview.attempt_number.desc()
+        )
+        .first()
+    )
+
+    # 3. No interview started
+    if not interview:
+        return {
+            "exists": False,
+            "status": "Not Started",
+            "interview_id": None,
+            "attempt_number": 0
+        }
+
+    # 4. Interview is still in progress
+    if interview.status == "In Progress":
+        current_status = "In Progress"
+
+    # 5. Interview completed but employee has not published
+    elif not interview.result_published:
+        current_status = "Awaiting Publication"
+
+    # 6. Employee has published the result
+    elif interview.status == "Passed":
+        current_status = "Published - Passed"
+
+    elif interview.status == "Failed":
+        current_status = "Published - Failed"
+
+    else:
+        current_status = "Unknown"
+
+    return {
+        "exists": True,
+        "status": current_status,
+        "interview_id": interview.id,
+        "attempt_number": interview.attempt_number,
+        "total_score": (
+            interview.total_score
+            if interview.result_published else None
+        ),
+        "passing_score": interview.passing_score
+    }
+
+
+@app.get("/student/mock-interview-results")
+def get_student_mock_interview_results(
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    results = (
+        db.query(
+            models.MockInterview,
+            models.TrainingEnrollment,
+            models.TrainingCourse,
+        )
+        .join(
+            models.TrainingEnrollment,
+            models.TrainingEnrollment.id
+            == models.MockInterview.enrollment_id,
+        )
+        .join(
+            models.TrainingCourse,
+            models.TrainingCourse.id
+            == models.TrainingEnrollment.course_id,
+        )
+        .filter(
+            models.TrainingEnrollment.student_id == student.id,
+            models.MockInterview.result_published.is_(True),
+            models.MockInterview.status.in_(["Passed", "Failed"]),
+        )
+        .order_by(models.MockInterview.completed_at.desc())
+        .all()
+    )
+
+    return [
+        {
+            "interview_id": interview.id,
+            "course_id": course.id,
+            "job_role": course.job_role,
+            "course_type": course.course_type,
+            "attempt_number": interview.attempt_number,
+            "total_score": interview.total_score,
+            "passing_score": interview.passing_score,
+            "status": interview.status,
+            "completed_at": interview.completed_at,
+            "published_at": interview.published_at,
+        }
+        for interview, enrollment, course in results
+    ]
+
+
+@app.get("/student/mock-interview-results/{interview_id}")
+def get_student_mock_interview_result_details(
+    interview_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    interview = (
+        db.query(models.MockInterview)
+        .join(
+            models.TrainingEnrollment,
+            models.TrainingEnrollment.id
+            == models.MockInterview.enrollment_id,
+        )
+        .filter(
+            models.MockInterview.id == interview_id,
+            models.TrainingEnrollment.student_id == student.id,
+        )
+        .first()
+    )
+
+    if not interview:
+        raise HTTPException(
+            status_code=404,
+            detail="Mock interview result not found.",
+        )
+
+    if not interview.result_published:
+        raise HTTPException(
+            status_code=403,
+            detail="This mock interview result has not been published yet.",
+        )
+
+    enrollment = (
+        db.query(models.TrainingEnrollment)
+        .filter(
+            models.TrainingEnrollment.id == interview.enrollment_id
+        )
+        .first()
+    )
+
+    course = (
+        db.query(models.TrainingCourse)
+        .filter(
+            models.TrainingCourse.id == enrollment.course_id
+        )
+        .first()
+    )
+
+    questions = (
+        db.query(models.MockInterviewQuestion)
+        .filter(
+            models.MockInterviewQuestion.interview_id == interview.id
+        )
+        .order_by(models.MockInterviewQuestion.question_number)
+        .all()
+    )
+
+    return {
+        "interview_id": interview.id,
+        "job_role": course.job_role,
+        "course_type": course.course_type,
+        "attempt_number": interview.attempt_number,
+        "total_score": interview.total_score,
+        "passing_score": interview.passing_score,
+        "status": interview.status,
+        "completed_at": interview.completed_at,
+        "published_at": interview.published_at,
+        "questions": [
+            {
+                "question_number": question.question_number,
+                "question_type": question.question_type,
+                "question_text": question.question_text,
+                "answer_transcript": question.answer_transcript,
+                "score": question.score,
+                "correctness_score": question.correctness_score,
+                "feedback": question.feedback,
+                "evaluation": question.evaluation_result,
+                "first_response_seconds": question.first_response_seconds,
+                "answer_duration_seconds": question.answer_duration_seconds,
+                "total_pause_seconds": question.total_pause_seconds,
+                "longest_pause_seconds": question.longest_pause_seconds,
+                "repetition_count": question.repetition_count,
+            }
+            for question in questions
+        ],
+    }
+
 @app.post(
     "/student/mock-interviews/{interview_id}/questions/{question_id}/answer"
 )
@@ -8168,6 +8378,32 @@ def evaluate_mock_interview(
         interview.published_by = None
         interview.published_at = None
 
+        # 9. Notify the employee who created the course
+        existing_notification = (
+        db.query(models.EmployeeNotification)
+        .filter(
+        models.EmployeeNotification.employee_id
+        == course.created_by,
+        models.EmployeeNotification.mock_interview_id
+        == interview.id
+    )
+    .first()
+)
+
+        if not existing_notification:
+            employee_notification = models.EmployeeNotification(
+                employee_id=course.created_by,
+                training_course_id=course.id,
+                mock_interview_id=interview.id,
+                message=(
+            f"Mock interview completed by {student.full_name} "
+            f"for {course.job_role}. "
+            "The result is awaiting your review and publication."
+                ),
+                is_read=False
+            )
+
+            db.add(employee_notification)
 # Commit the evaluation
         db.commit()
 
@@ -8245,5 +8481,95 @@ def get_mock_interview_results(
         }
         for interview, student, course in interviews
     ]
+
+
+@app.patch("/employee/mock-interview-results/{interview_id}/publish")
+def publish_mock_interview_result(
+    interview_id: int,
+    db: Session = Depends(get_db),
+    employee: models.Employee = Depends(require_employee),
+):
+    # 1. Retrieve interview and verify course ownership
+    interview_data = (
+        db.query(
+            models.MockInterview,
+            models.TrainingEnrollment,
+            models.TrainingCourse,
+        )
+        .join(
+            models.TrainingEnrollment,
+            models.TrainingEnrollment.id
+            == models.MockInterview.enrollment_id
+        )
+        .join(
+            models.TrainingCourse,
+            models.TrainingCourse.id
+            == models.TrainingEnrollment.course_id
+        )
+        .filter(
+            models.MockInterview.id == interview_id,
+            models.TrainingCourse.created_by == employee.id,
+        )
+        .with_for_update()
+        .first()
+    )
+
+    if not interview_data:
+        raise HTTPException(
+            status_code=404,
+            detail="Mock interview not found."
+        )
+
+    interview, enrollment, course = interview_data
+
+    # 2. Verify evaluation is completed
+    if interview.status not in ["Passed", "Failed"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Mock interview evaluation is not completed."
+        )
+
+    # 3. Prevent duplicate publication
+    if interview.result_published:
+        raise HTTPException(
+            status_code=409,
+            detail="Mock interview result has already been published."
+        )
+
+    try:
+        # 4. Publish the result
+        interview.result_published = True
+        interview.published_by = employee.id
+        interview.published_at = datetime.now(timezone.utc)
+
+        # 5. Create student notification
+        notification = models.Notification(
+            student_id=enrollment.student_id,
+            application_id=None,
+            message=(
+                f"Your mock interview result for {course.job_role} "
+                f"has been published. "
+                "Please check your Mock Interview Results page."
+            )
+        )
+
+        db.add(notification)
+
+        # 6. Commit changes
+        db.commit()
+        db.refresh(interview)
+
+        return {
+            "message": "Mock interview result published successfully.",
+            "interview_id": interview.id,
+            "result_published": interview.result_published,
+            "published_by": interview.published_by,
+            "published_at": interview.published_at,
+        }
+
+    except Exception:
+        db.rollback()
+        raise
+
 
 

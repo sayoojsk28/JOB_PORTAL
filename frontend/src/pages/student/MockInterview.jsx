@@ -447,6 +447,8 @@ export default function MockInterview() {
   };
 
   // Evaluate completed interview
+  
+  // Evaluate completed interview
   const evaluateInterview = async () => {
     if (!interview) return;
 
@@ -454,19 +456,12 @@ export default function MockInterview() {
     setError('');
 
     try {
-      const response = await api.post(
+      await api.post(
         `/student/mock-interviews/${interview.interview_id}/evaluate`
       );
 
-      setEvaluation(response.data);
-
-      setMessages((previous) => [
-        ...previous,
-        {
-          role: 'assistant',
-          content: `Interview evaluation completed. Your final score is ${response.data.total_score}/100. Result: ${response.data.status}.`
-        }
-      ]);
+      // Evaluation completed. Return to Training Courses.
+      navigate('/student/training-courses');
 
     } catch (err) {
       console.error('Evaluation error:', err);

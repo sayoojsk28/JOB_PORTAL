@@ -16,6 +16,12 @@ const dashboardCards = [
     path: '/employee/companies',
   },
   {
+  title: 'Mock Interview Results',
+  description: 'Review completed student mock interviews and publish their results.',
+  icon: '🎯',
+  path: '/employee/mock-interview-results',
+},
+  {
   title: 'View Accepted Companies',
   description: 'View all approved companies and manage their vacancy postings.',
   icon: '✅',
