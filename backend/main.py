@@ -43,6 +43,9 @@ from schemas import (
     InterviewAnalysisCreate,
     VacancyUpdate,
     MockInterviewAnswerSubmit,
+    SelfDiscoveryMessageResponse,
+    SelfDiscoveryChatRequest,
+    SelfDiscoveryChatResponse,
 )
 
 import os
@@ -78,10 +81,11 @@ from reportlab.lib.units import inch
 from xml.sax.saxutils import escape
 from training_generator import (
     generate_course_questionnaire,
-       analyze_training_questionnaire_with_ai,
+    analyze_training_questionnaire_with_ai,
     generate_training_submission_pdf,
     generate_mock_interview_questions,
     evaluate_mock_interview_answer,
+    generate_self_discovery_response,  # New import
 )
 os.makedirs("uploads/employee_photos", exist_ok=True)
 
@@ -7451,6 +7455,622 @@ def get_student_training_course_submission(
     }
 
 
+
+@app.post("/student/training-courses/{course_id}/self-discovery/start")
+def start_self_discovery(
+    course_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    modes = [
+        "interests_motivations",
+        "preferences_work_style",
+        "experiences_strengths",
+        "challenges_self_reflection"
+    ]
+
+    MIN_MESSAGES_PER_MODE = 5
+
+    try:
+        # 1. Verify active enrollment
+        enrollment = (
+            db.query(models.TrainingEnrollment)
+            .filter(
+                models.TrainingEnrollment.course_id == course_id,
+                models.TrainingEnrollment.student_id == student.id,
+            )
+            .with_for_update()
+            .first()
+        )
+
+        if not enrollment:
+            raise HTTPException(
+                status_code=404,
+                detail="Training enrollment not found."
+            )
+
+        if enrollment.status != "Active":
+            raise HTTPException(
+                status_code=409,
+                detail="Training enrollment is not active."
+            )
+
+        # 2. Verify approved eligibility
+        eligibility = (
+            db.query(models.TrainingEligibility)
+            .filter(
+                models.TrainingEligibility.id == enrollment.eligibility_id,
+                models.TrainingEligibility.status == "Approved"
+            )
+            .first()
+        )
+
+        if not eligibility:
+            raise HTTPException(
+                status_code=409,
+                detail="Training eligibility is not approved."
+            )
+
+        # 3. Verify active course
+        course = (
+            db.query(models.TrainingCourse)
+            .filter(
+                models.TrainingCourse.id == course_id,
+                models.TrainingCourse.status == "Active"
+            )
+            .first()
+        )
+
+        if not course:
+            raise HTTPException(
+                status_code=404,
+                detail="Active training course not found."
+            )
+
+        # 4. Verify generated questionnaire PDF
+        submission = (
+            db.query(models.TrainingCourseSubmission)
+            .filter(
+                models.TrainingCourseSubmission.enrollment_id
+                == enrollment.id,
+                models.TrainingCourseSubmission.status == "Generated"
+            )
+            .first()
+        )
+
+        if not submission:
+            raise HTTPException(
+                status_code=409,
+                detail="Please complete your course questionnaire first."
+            )
+
+        # 5. Retrieve existing Self Discovery session
+        session = (
+            db.query(models.SelfDiscoverySession)
+            .filter(
+                models.SelfDiscoverySession.enrollment_id == enrollment.id
+            )
+            .first()
+        )
+
+        is_new_session = False
+
+        # 6. Create session if it does not exist
+        if not session:
+            session = models.SelfDiscoverySession(
+                enrollment_id=enrollment.id,
+                status="In Progress"
+            )
+
+            db.add(session)
+            db.flush()
+
+            is_new_session = True
+
+            log_action(
+                db=db,
+                user_id=student.user_id,
+                action="SELF_DISCOVERY_STARTED",
+                target_type="self_discovery_session",
+                target_id=session.id,
+                details=(
+                    f"Self Discovery started for {course.job_role}"
+                ),
+            )
+
+        # 7. Retrieve all messages belonging to this session
+        messages = (
+            db.query(models.SelfDiscoveryMessage)
+            .filter(
+                models.SelfDiscoveryMessage.session_id == session.id,
+                models.SelfDiscoveryMessage.mode.in_(modes)
+            )
+            .order_by(
+                models.SelfDiscoveryMessage.sequence_number.asc()
+            )
+            .all()
+        )
+
+        # 8. Prepare separate conversation histories
+        mode_histories = {
+            mode: [] for mode in modes
+        }
+
+        # Count only student messages in each mode
+        mode_message_counts = {
+            mode: 0 for mode in modes
+        }
+
+        for message in messages:
+            mode_histories[message.mode].append({
+                "id": message.id,
+                "sequence_number": message.sequence_number,
+                "mode": message.mode,
+                "role": message.role,
+                "message": message.message,
+                "created_at": message.created_at
+            })
+
+            if message.role == "user":
+                mode_message_counts[message.mode] += 1
+
+        # 9. Determine whether each mode has reached its requirement
+        mode_completion = {
+            mode: mode_message_counts[mode] >= MIN_MESSAGES_PER_MODE
+            for mode in modes
+        }
+
+        # 10. Determine whether Continue Course can be unlocked
+        continue_course_available = all(
+            mode_completion.values()
+        )
+
+        db.commit()
+        db.refresh(session)
+
+        return {
+            "message": (
+                "Self Discovery session created successfully."
+                if is_new_session
+                else "Existing Self Discovery session retrieved successfully."
+            ),
+            "is_new_session": is_new_session,
+            "session": {
+                "id": session.id,
+                "enrollment_id": session.enrollment_id,
+                "status": session.status,
+                "discovery_summary": None,
+                "started_at": session.started_at,
+                "completed_at": session.completed_at
+            },
+            "mode_histories": mode_histories,
+            "mode_message_counts": mode_message_counts,
+            "mode_completion": mode_completion,
+            "minimum_messages_per_mode": MIN_MESSAGES_PER_MODE,
+            "continue_course_available": continue_course_available
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start Self Discovery: {str(e)}"
+        )
+
+
+@app.post(
+    "/student/training-courses/{course_id}/self-discovery/chat",
+    response_model=SelfDiscoveryChatResponse
+)
+def self_discovery_chat(
+    course_id: int,
+    request: SelfDiscoveryChatRequest,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    valid_modes = [
+        "interests_motivations",
+        "preferences_work_style",
+        "experiences_strengths",
+        "challenges_self_reflection"
+    ]
+
+    MIN_MESSAGES_PER_MODE = 5
+
+    try:
+        # 1. Validate selected mode
+        if request.mode not in valid_modes:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid Self Discovery mode."
+            )
+
+        message_text = request.message.strip()
+
+        if not message_text:
+            raise HTTPException(
+                status_code=400,
+                detail="Message cannot be empty."
+            )
+
+        # 2. Verify active enrollment
+        enrollment = (
+            db.query(models.TrainingEnrollment)
+            .filter(
+                models.TrainingEnrollment.course_id == course_id,
+                models.TrainingEnrollment.student_id == student.id,
+                models.TrainingEnrollment.status == "Active"
+            )
+            .with_for_update()
+            .first()
+        )
+
+        if not enrollment:
+            raise HTTPException(
+                status_code=404,
+                detail="Active training enrollment not found."
+            )
+
+        # 3. Retrieve Self Discovery session
+        session = (
+            db.query(models.SelfDiscoverySession)
+            .filter(
+                models.SelfDiscoverySession.enrollment_id == enrollment.id
+            )
+            .with_for_update()
+            .first()
+        )
+
+        if not session or session.status != "In Progress":
+            raise HTTPException(
+                status_code=409,
+                detail="No active Self Discovery session found."
+            )
+
+        # 4. Retrieve active course
+        course = (
+            db.query(models.TrainingCourse)
+            .filter(
+                models.TrainingCourse.id == course_id,
+                models.TrainingCourse.status == "Active"
+            )
+            .first()
+        )
+
+        if not course:
+            raise HTTPException(
+                status_code=404,
+                detail="Active training course not found."
+            )
+
+        # 5. Retrieve ONLY the selected mode's conversation
+        messages = (
+            db.query(models.SelfDiscoveryMessage)
+            .filter(
+                models.SelfDiscoveryMessage.session_id == session.id,
+                models.SelfDiscoveryMessage.mode == request.mode
+            )
+            .order_by(
+                models.SelfDiscoveryMessage.sequence_number.asc()
+            )
+            .all()
+        )
+
+        # 6. Validate conversation sequence within this mode
+        if messages and messages[-1].role != "assistant":
+            raise HTTPException(
+                status_code=409,
+                detail="Conversation state is invalid. Please refresh."
+            )
+
+        # 7. Prepare selected mode's conversation history
+        conversation_history = [
+            {
+                "role": message.role,
+                "content": message.message
+            }
+            for message in messages
+        ]
+
+        # 8. Find the next GLOBAL sequence number for this session
+        # Sequence numbers remain unique across all four modes.
+        existing_sequence_numbers = (
+            db.query(models.SelfDiscoveryMessage.sequence_number)
+            .filter(
+                models.SelfDiscoveryMessage.session_id == session.id
+            )
+            .all()
+        )
+
+        next_sequence = max(
+            (item[0] for item in existing_sequence_numbers),
+            default=0
+        ) + 1
+
+        # 9. Save student's message under the selected mode
+        student_message = models.SelfDiscoveryMessage(
+            session_id=session.id,
+            sequence_number=next_sequence,
+            mode=request.mode,
+            role="user",
+            message=message_text
+        )
+
+        db.add(student_message)
+        db.flush()
+
+        # 10. Retrieve resumes linked to this specific course
+        resumes = (
+            db.query(models.Resume)
+            .join(
+                models.Application,
+                models.Application.resume_id == models.Resume.resume_id
+            )
+            .join(
+                models.TrainingCourseApplication,
+                models.TrainingCourseApplication.application_id
+                == models.Application.application_id
+            )
+            .filter(
+                models.TrainingCourseApplication.course_id == course_id,
+                models.Application.student_id == student.id,
+                models.Resume.student_id == student.id
+            )
+            .all()
+        )
+
+        resume_text_parts = []
+
+        for resume in resumes:
+            extracted_text = (
+                resume.extracted_text.strip()
+                if resume.extracted_text
+                else ""
+            )
+
+            if not extracted_text and resume.file_path:
+                extracted_text = extract_resume_text(resume.file_path)
+
+            if extracted_text:
+                resume_text_parts.append(extracted_text)
+
+            if resume.extracted_skills:
+                resume_text_parts.append(
+                    "Extracted Skills: "
+                    + str(resume.extracted_skills)
+                )
+
+        resume_text = "\n\n".join(resume_text_parts)
+
+        # 11. Generate AI response using ONLY this mode's history
+        result = generate_self_discovery_response(
+            job_role=course.job_role,
+            course_type=course.course_type,
+            resume_text=resume_text,
+            conversation_history=conversation_history,
+            mode=request.mode,
+            student_message=message_text
+        )
+
+        # 12. Save AI response under the same mode
+        ai_message = models.SelfDiscoveryMessage(
+            session_id=session.id,
+            sequence_number=next_sequence + 1,
+            mode=request.mode,
+            role="assistant",
+            message=result["reply"]
+        )
+
+        db.add(ai_message)
+        db.flush()
+
+        # 13. Calculate student message counts for all four modes
+        mode_message_counts = {
+            mode: 0
+            for mode in valid_modes
+        }
+
+        user_message_counts = (
+            db.query(
+                models.SelfDiscoveryMessage.mode,
+                func.count(models.SelfDiscoveryMessage.id)
+            )
+            .filter(
+                models.SelfDiscoveryMessage.session_id == session.id,
+                models.SelfDiscoveryMessage.role == "user",
+                models.SelfDiscoveryMessage.mode.in_(valid_modes)
+            )
+            .group_by(
+                models.SelfDiscoveryMessage.mode
+            )
+            .all()
+        )
+
+        for mode, count in user_message_counts:
+            mode_message_counts[mode] = count
+
+        # 14. Check completion status for each mode
+        mode_completion = {
+            mode: (
+                mode_message_counts[mode]
+                >= MIN_MESSAGES_PER_MODE
+            )
+            for mode in valid_modes
+        }
+
+        # 15. Check whether Continue Course is available
+        continue_course_available = all(
+            mode_completion.values()
+        )
+
+        # 16. Do not complete the session automatically
+        # Continue Course will be the only completion action.
+        db.commit()
+
+        db.refresh(ai_message)
+        db.refresh(session)
+
+        return {
+            "session": session,
+            "reply": ai_message.message,
+            "sequence_number": ai_message.sequence_number,
+            "mode_message_counts": mode_message_counts,
+            "mode_completion": mode_completion,
+            "minimum_messages_per_mode": MIN_MESSAGES_PER_MODE,
+            "continue_course_available": continue_course_available
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process Self Discovery response: {str(e)}"
+        )
+
+@app.post(
+    "/student/training-courses/{course_id}/self-discovery/continue"
+)
+def continue_self_discovery(
+    course_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    valid_modes = [
+        "interests_motivations",
+        "preferences_work_style",
+        "experiences_strengths",
+        "challenges_self_reflection"
+    ]
+
+    MIN_MESSAGES_PER_MODE = 5
+
+    try:
+        # 1. Verify active enrollment
+        enrollment = (
+            db.query(models.TrainingEnrollment)
+            .filter(
+                models.TrainingEnrollment.course_id == course_id,
+                models.TrainingEnrollment.student_id == student.id,
+                models.TrainingEnrollment.status == "Active"
+            )
+            .with_for_update()
+            .first()
+        )
+
+        if not enrollment:
+            raise HTTPException(
+                status_code=404,
+                detail="Active training enrollment not found."
+            )
+
+        # 2. Retrieve Self Discovery session
+        session = (
+            db.query(models.SelfDiscoverySession)
+            .filter(
+                models.SelfDiscoverySession.enrollment_id == enrollment.id
+            )
+            .with_for_update()
+            .first()
+        )
+
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail="Self Discovery session not found."
+            )
+
+        # 3. Allow idempotent request if already completed
+        if session.status == "Completed":
+            db.refresh(session)
+
+            return {
+                "message": "Self Discovery is already completed.",
+                "session": session,
+                "continue_course_available": True
+            }
+
+        if session.status != "In Progress":
+            raise HTTPException(
+                status_code=409,
+                detail="Self Discovery session is not active."
+            )
+
+        # 4. Count student responses in each mode
+        mode_message_counts = {
+            mode: 0
+            for mode in valid_modes
+        }
+
+        user_message_counts = (
+            db.query(
+                models.SelfDiscoveryMessage.mode,
+                func.count(models.SelfDiscoveryMessage.id)
+            )
+            .filter(
+                models.SelfDiscoveryMessage.session_id == session.id,
+                models.SelfDiscoveryMessage.role == "user",
+                models.SelfDiscoveryMessage.mode.in_(valid_modes)
+            )
+            .group_by(
+                models.SelfDiscoveryMessage.mode
+            )
+            .all()
+        )
+
+        for mode, count in user_message_counts:
+            mode_message_counts[mode] = count
+
+        # 5. Verify minimum responses for every mode
+        incomplete_modes = {
+            mode: count
+            for mode, count in mode_message_counts.items()
+            if count < MIN_MESSAGES_PER_MODE
+        }
+
+        if incomplete_modes:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Complete at least 5 responses in all four Self Discovery modes.",
+                    "incomplete_modes": incomplete_modes,
+                    "minimum_messages_per_mode": MIN_MESSAGES_PER_MODE
+                }
+            )
+
+        # 6. Complete the session
+        session.status = "Completed"
+        session.completed_at = datetime.now()
+
+        db.commit()
+        db.refresh(session)
+
+        # 7. Return success
+        return {
+            "message": "Self Discovery completed successfully.",
+            "session": session,
+            "mode_message_counts": mode_message_counts,
+            "continue_course_available": True
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to complete Self Discovery: {str(e)}"
+        )
+    
 @app.post("/student/training-courses/{course_id}/mock-interviews/start")
 def start_mock_interview(
     course_id: int,

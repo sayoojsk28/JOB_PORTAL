@@ -62,6 +62,8 @@ import EmployeeEditDetails from '../pages/employee/EmployeeEditDetails';
 import MockInterview from '../pages/student/MockInterview';
 import StudentMockInterviewResults from '../pages/student/StudentMockInterviewResults';
 import EmployeeMockInterviewResults from '../pages/employee/EmployeeMockInterviewResults';
+import SelfDiscoveryStudio from '../pages/student/SelfDiscoveryStudio';
+import SelfDiscoveryChat from '../pages/student/SelfDiscoveryChat';
 
 const AppRoutes = () => {
   return (
@@ -240,6 +242,15 @@ const AppRoutes = () => {
           <Route
   path="/student/training-courses/:courseId/mock-interview"
   element={<MockInterview />}
+/>
+<Route
+  path="/student/training-courses/:courseId/self-discovery"
+  element={<SelfDiscoveryStudio />}
+/>
+
+<Route
+  path="/student/training-courses/:courseId/self-discovery/chat"
+  element={<SelfDiscoveryChat />}
 />
 
         </Route>

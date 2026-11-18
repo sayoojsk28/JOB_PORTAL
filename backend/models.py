@@ -1316,3 +1316,75 @@ class MockInterviewQuestion(Base):
     answered_at = Column(DateTime, nullable=True)
 
 
+class SelfDiscoverySession(Base):
+    __tablename__ = "self_discovery_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    enrollment_id = Column(
+        Integer,
+        ForeignKey("training_enrollments.id"),
+        nullable=False,
+        unique=True,
+        index=True
+    )
+
+    status = Column(
+        String(20),
+        nullable=False,
+        default="In Progress",
+        server_default=text("'In Progress'")
+    )
+
+    discovery_summary = Column(JSON, nullable=True)
+
+    started_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now()
+    )
+
+    completed_at = Column(DateTime, nullable=True)
+
+
+class SelfDiscoveryMessage(Base):
+    __tablename__ = "self_discovery_messages"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "sequence_number",
+            name="uq_self_discovery_message_sequence"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    session_id = Column(
+        Integer,
+        ForeignKey("self_discovery_sessions.id"),
+        nullable=False,
+        index=True
+    )
+
+    sequence_number = Column(Integer, nullable=False)
+
+    mode = Column(
+        String(40),
+        nullable=False
+    )
+
+    role = Column(
+        String(20),
+        nullable=False
+    )
+
+    message = Column(Text, nullable=False)
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now()
+    )
+
+

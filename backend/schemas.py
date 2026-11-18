@@ -397,3 +397,42 @@ class MockInterviewAnswerSubmit(BaseModel):
     longest_pause_seconds: float = Field(default=0, ge=0)
 
     repetition_count: int = Field(default=0, ge=0)
+
+class SelfDiscoverySessionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    enrollment_id: int
+    status: str
+    discovery_summary: dict | None = None
+    started_at: datetime
+    completed_at: datetime | None = None
+    
+class SelfDiscoveryChatResponse(BaseModel):
+    session: SelfDiscoverySessionResponse
+    reply: str
+    sequence_number: int
+
+    mode_message_counts: dict[str, int]
+    mode_completion: dict[str, bool]
+    minimum_messages_per_mode: int
+    continue_course_available: bool
+
+
+class SelfDiscoveryMessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    sequence_number: int
+    mode: str
+    role: str
+    message: str
+    created_at: datetime
+
+
+class SelfDiscoveryChatRequest(BaseModel):
+    mode: str
+    message: str = Field(min_length=1, max_length=5000)
+
+
+

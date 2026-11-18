@@ -17,12 +17,12 @@ function StudentCourseQuestionnaire() {
   const [pdfUrl, setPdfUrl] = useState('');
   const [submissionId, setSubmissionId] = useState(null);
   const [submissionExists, setSubmissionExists] = useState(false);
-  const [mockInterviewStatus, setMockInterviewStatus] = useState(null);
-  const [statusLoading, setStatusLoading] = useState(true);
-  const [statusError, setStatusError] = useState('');
+  // const [mockInterviewStatus, setMockInterviewStatus] = useState(null);
+  // const [statusLoading, setStatusLoading] = useState(true);
+  // const [statusError, setStatusError] = useState('');
 
-  const [completing, setCompleting] = useState(false);
-  const [completionError, setCompletionError] = useState('');
+  // const [completing, setCompleting] = useState(false);
+  // const [completionError, setCompletionError] = useState('');
 
   // Load questionnaire and recover existing submission after refresh
   useEffect(() => {
@@ -166,13 +166,13 @@ function StudentCourseQuestionnaire() {
     totalQuestions === 20 &&
     answeredQuestions === totalQuestions;
 
-  const canStartMockInterview =
-    !statusLoading &&
-    !statusError &&
-    (
-      mockInterviewStatus === 'Not Started' ||
-      mockInterviewStatus === 'Published - Failed'
-    );
+  // const canStartMockInterview =
+  //   !statusLoading &&
+  //   !statusError &&
+  //   (
+  //     mockInterviewStatus === 'Not Started' ||
+  //     mockInterviewStatus === 'Published - Failed'
+  //   );
 
   // Generate PDF
   const handleGeneratePDF = async () => {
@@ -234,29 +234,15 @@ function StudentCourseQuestionnaire() {
   };
 
   // Complete course
-  const handleCompleteCourse = async () => {
-    if (completing || !pdfUrl) return;
+  // Continue to Part 3 – Self Discovery Studio
+  // Continue to Self Discovery Studio
+  const handleContinueToSelfDiscovery = () => {
+  if (!pdfUrl) return;
 
-    setCompleting(true);
-    setCompletionError('');
-
-    try {
-      await api.post(
-        `/student/training-courses/${courseId}/complete`
-      );
-
-      navigate('/student/training-courses');
-
-    } catch (err) {
-      setCompletionError(
-        err.response?.data?.detail ||
-        'Failed to complete the course. Please try again.'
-      );
-    } finally {
-      setCompleting(false);
-    }
-  };
-
+  navigate(
+    `/student/training-courses/${courseId}/self-discovery`
+  );
+};
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
@@ -327,7 +313,7 @@ function StudentCourseQuestionnaire() {
           <p className="mt-2 text-slate-500">
             Answer all the questions below carefully.
           </p>
-
+          {!submissionExists && !pdfUrl && (
           <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="font-semibold text-slate-800">
@@ -348,42 +334,41 @@ function StudentCourseQuestionnaire() {
               />
             </div>
           </div>
+          )}
         </div>
 
-        {/* Questions */}
-        <div className="space-y-5">
-          {questionnaire.questions.map((question) => (
-            <article
-              key={question.id}
-              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
-            >
-              <div className="mb-4 flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-sm font-bold text-blue-700">
-                  {question.question_number}
-                </span>
+       {/* Questions */}
+{!submissionExists && !pdfUrl && (
+  <div className="space-y-5">
+    {questionnaire.questions.map((question) => (
+      <article
+        key={question.id}
+        className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
+      >
+        <div className="mb-4 flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-sm font-bold text-blue-700">
+            {question.question_number}
+          </span>
 
-                <h2 className="pt-1 text-base font-semibold leading-relaxed text-slate-800">
-                  {question.question_text}
-                </h2>
-              </div>
-
-              <textarea
-                value={answers[question.id] || ''}
-                onChange={(e) =>
-                  handleAnswerChange(question.id, e.target.value)
-                }
-                disabled={
-                  generating ||
-                  !!pdfUrl ||
-                  submissionExists
-                }
-                rows={5}
-                placeholder="Write your answer here..."
-                className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-70"
-              />
-            </article>
-          ))}
+          <h2 className="pt-1 text-base font-semibold leading-relaxed text-slate-800">
+            {question.question_text}
+          </h2>
         </div>
+
+        <textarea
+          value={answers[question.id] || ''}
+          onChange={(e) =>
+            handleAnswerChange(question.id, e.target.value)
+          }
+          disabled={generating}
+          rows={5}
+          placeholder="Write your answer here..."
+          className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-70"
+        />
+      </article>
+    ))}
+  </div>
+)}
 
         {/* Generate PDF */}
         <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
@@ -458,7 +443,7 @@ function StudentCourseQuestionnaire() {
                   Submission ID: #{submissionId}
                 </p>
                 
-<button
+{/* <button
   type="button"
   onClick={() =>
     navigate(
@@ -482,35 +467,33 @@ function StudentCourseQuestionnaire() {
           ? 'Awaiting Employee Review'
           : mockInterviewStatus === 'Published - Passed'
             ? 'Mock Interview Passed'
-            : 'Start Mock Interview →'}
-</button>
+            : 'Start Mock Interview →'} */}
+{/* </button> */}
 
-{statusError && (
+{/* {statusError && (
   <p className="mt-3 text-sm text-red-600">
     {statusError}
   </p>
-)}
+)} */}
 
                 <button
-                  type="button"
-                  onClick={handleCompleteCourse}
-                  disabled={completing}
-                  className={`mt-5 w-full rounded-xl px-6 py-3 text-sm font-semibold transition ${
-                    completing
-                      ? 'cursor-not-allowed bg-slate-300 text-slate-500'
-                      : 'bg-green-600 text-white hover:bg-green-700'
-                  }`}
-                >
-                  {completing
-                    ? 'Completing Course...'
-                    : 'Complete Course'}
-                </button>
+  type="button"
+  onClick={handleContinueToSelfDiscovery}
+  disabled={!pdfUrl}
+  className={`mt-5 w-full rounded-xl px-6 py-3 text-sm font-semibold transition ${
+    pdfUrl
+      ? 'bg-green-600 text-white hover:bg-green-700'
+      : 'cursor-not-allowed bg-slate-200 text-slate-500'
+  }`}
+>
+  Continue to Self Discovery →
+</button>
 
-                {completionError && (
+                {/* {completionError && (
                   <p className="mt-3 text-sm text-red-600">
                     {completionError}
                   </p>
-                )}
+                )} */}
               </div>
             </div>
           )}
