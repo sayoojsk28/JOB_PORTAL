@@ -46,6 +46,7 @@ from schemas import (
     SelfDiscoveryMessageResponse,
     SelfDiscoveryChatRequest,
     SelfDiscoveryChatResponse,
+    
 )
 
 import os
@@ -85,7 +86,8 @@ from training_generator import (
     generate_training_submission_pdf,
     generate_mock_interview_questions,
     evaluate_mock_interview_answer,
-    generate_self_discovery_response,  # New import
+    generate_self_discovery_response, 
+    generate_hr_interview_questions, # New import
 )
 os.makedirs("uploads/employee_photos", exist_ok=True)
 
@@ -7359,6 +7361,36 @@ def complete_student_training_course(
             detail="This enrollment is not active."
         )
 
+    # Validate latest mock interview
+    latest_interview = (
+    db.query(models.MockInterview)
+    .filter(
+        models.MockInterview.enrollment_id == enrollment.id
+    )
+    .order_by(
+        models.MockInterview.attempt_number.desc()
+    )
+    .first()
+    )
+
+    if not latest_interview:
+        raise HTTPException(
+            status_code=400,
+            detail="Mock interview not completed yet."
+    )
+
+    if latest_interview.status != "Passed":
+        raise HTTPException(
+            status_code=400,
+            detail="You must pass the mock interview before completing the course."
+    )
+
+    if not latest_interview.result_published:
+        raise HTTPException(
+            status_code=400,
+            detail="Mock interview result has not been published yet."
+    )
+
     submission = (
         db.query(models.TrainingCourseSubmission)
         .filter(
@@ -8150,20 +8182,52 @@ def start_mock_interview(
                 detail="Please generate your course PDF first."
             )
 
-        # 5. Prevent another interview if already passed
-        passed_interview = (
+        # 5. Check previous interview attempts
+        previous_interviews = (
             db.query(models.MockInterview)
             .filter(
-                models.MockInterview.enrollment_id == enrollment.id,
-                models.MockInterview.status == "Passed"
+                models.MockInterview.enrollment_id == enrollment.id
             )
-            .first()
+            .order_by(
+                models.MockInterview.attempt_number.desc()
+            )
+            .all()
+        )
+
+        # Block if a previous attempt has passed
+        passed_interview = next(
+            (
+                interview
+                for interview in previous_interviews
+                if interview.status == "Passed"
+            ),
+            None
         )
 
         if passed_interview:
             raise HTTPException(
                 status_code=409,
                 detail="You have already passed the mock interview."
+            )
+
+        # Block retry while a failed result is awaiting publication
+        pending_failed_result = next(
+            (
+                interview
+                for interview in previous_interviews
+                if interview.status == "Failed"
+                and not interview.result_published
+            ),
+            None
+        )
+
+        if pending_failed_result:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Please wait for the employee to publish "
+                    "your mock interview result."
+                )
             )
 
         # 6. Prevent duplicate active attempts
@@ -8245,12 +8309,27 @@ def start_mock_interview(
             raise HTTPException(
                 status_code=502,
                 detail=(
-                    "Mock interview question generation failed: "
+                    "Technical question generation failed: "
                     f"{str(ai_error)}"
                 )
             )
 
-        # 10. Calculate next attempt number
+        # 10. Generate 4 role-based HR questions
+        try:
+            hr_questions = generate_hr_interview_questions(
+                job_role=course.job_role,
+                course_type=course.course_type
+            )
+        except Exception as ai_error:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "HR question generation failed: "
+                    f"{str(ai_error)}"
+                )
+            )
+
+        # 11. Calculate next attempt number
         last_attempt = (
             db.query(models.MockInterview)
             .filter(
@@ -8267,7 +8346,7 @@ def start_mock_interview(
             if last_attempt else 1
         )
 
-        # 11. Create interview attempt
+        # 12. Create interview attempt
         interview = models.MockInterview(
             enrollment_id=enrollment.id,
             attempt_number=attempt_number,
@@ -8278,7 +8357,7 @@ def start_mock_interview(
         db.add(interview)
         db.flush()
 
-        # 12. Add introduction question
+        # 13. Add introduction question
         introduction_question = models.MockInterviewQuestion(
             interview_id=interview.id,
             question_number=1,
@@ -8292,7 +8371,7 @@ def start_mock_interview(
 
         db.add(introduction_question)
 
-        # 13. Save 5 technical questions
+        # 14. Save 5 technical questions
         for question_number, question_text in enumerate(
             technical_questions,
             start=2
@@ -8306,7 +8385,21 @@ def start_mock_interview(
                 )
             )
 
-        # 14. Log interview creation
+        # 15. Save 4 HR questions
+        for question_number, question_text in enumerate(
+            hr_questions,
+            start=7
+        ):
+            db.add(
+                models.MockInterviewQuestion(
+                    interview_id=interview.id,
+                    question_number=question_number,
+                    question_type="HR",
+                    question_text=question_text
+                )
+            )
+
+        # 16. Log interview creation
         log_action(
             db=db,
             user_id=student.user_id,
@@ -8329,7 +8422,7 @@ def start_mock_interview(
             "attempt_number": interview.attempt_number,
             "status": interview.status,
             "passing_score": interview.passing_score,
-            "total_questions": 6,
+            "total_questions": 10,
             "current_question": {
                 "question_id": introduction_question.id,
                 "question_number": introduction_question.question_number,
@@ -8348,8 +8441,7 @@ def start_mock_interview(
             status_code=500,
             detail=f"Failed to start mock interview: {str(e)}"
         )
-
-
+    
 @app.get(
     "/student/training-courses/{course_id}/mock-interviews/active"
 )
@@ -8672,6 +8764,7 @@ def get_student_mock_interview_result_details(
         ],
     }
 
+
 @app.post(
     "/student/mock-interviews/{interview_id}/questions/{question_id}/answer"
 )
@@ -8771,15 +8864,15 @@ def submit_mock_interview_answer(
         )
 
         current_question.answered_at = datetime.now()
+        db.flush()
 
-        # 6. Find the next question
+        # 6. Find the next unanswered question
         next_question = (
             db.query(models.MockInterviewQuestion)
             .filter(
                 models.MockInterviewQuestion.interview_id
                 == interview.id,
-                models.MockInterviewQuestion.question_number
-                > current_question.question_number
+                models.MockInterviewQuestion.answer_transcript.is_(None)
             )
             .order_by(
                 models.MockInterviewQuestion.question_number
@@ -8787,15 +8880,36 @@ def submit_mock_interview_answer(
             .first()
         )
 
-        # 7. Save everything
+        # 7. Calculate interview progress dynamically
+        total_questions = (
+            db.query(models.MockInterviewQuestion)
+            .filter(
+                models.MockInterviewQuestion.interview_id
+                == interview.id
+            )
+            .count()
+        )
+
+        completed_questions = (
+            db.query(models.MockInterviewQuestion)
+            .filter(
+                models.MockInterviewQuestion.interview_id
+                == interview.id,
+                models.MockInterviewQuestion.answer_transcript.isnot(None)
+            )
+            .count()
+        )
+
+        # 8. Save everything
         db.commit()
 
+        # 9. Return the next question
         if next_question:
             return {
                 "message": "Answer submitted successfully.",
                 "interview_id": interview.id,
-                "completed_questions": current_question.question_number,
-                "total_questions": 6,
+                "completed_questions": completed_questions,
+                "total_questions": total_questions,
                 "evaluation_pending": False,
                 "next_question": {
                     "question_id": next_question.id,
@@ -8805,12 +8919,12 @@ def submit_mock_interview_answer(
                 }
             }
 
-        # All six questions are answered
+        # 10. All questions are answered
         return {
             "message": "All interview questions answered successfully.",
             "interview_id": interview.id,
-            "completed_questions": 6,
-            "total_questions": 6,
+            "completed_questions": completed_questions,
+            "total_questions": total_questions,
             "evaluation_pending": True
         }
 
@@ -8905,10 +9019,12 @@ def evaluate_mock_interview(
             .all()
         )
 
-        if len(questions) != 6:
+        total_questions = len(questions)
+
+        if total_questions == 0:
             raise HTTPException(
                 status_code=400,
-                detail="Interview must contain exactly 6 questions."
+                detail="Interview contains no questions."
             )
 
         if any(
@@ -8918,7 +9034,10 @@ def evaluate_mock_interview(
         ):
             raise HTTPException(
                 status_code=400,
-                detail="All 6 questions must be answered before evaluation."
+                detail=(
+                    f"All {total_questions} questions must be "
+                    "answered before evaluation."
+                )
             )
 
         # 4. Evaluate every answer using Ollama
@@ -8930,7 +9049,8 @@ def evaluate_mock_interview(
                 question=question.question_text,
                 answer=question.answer_transcript,
                 job_role=course.job_role,
-                course_type=course.course_type
+                course_type=course.course_type,
+                question_type=question.question_type
             )
 
             evaluation_results.append({
@@ -8945,7 +9065,7 @@ def evaluate_mock_interview(
         )
 
         average_ai_score = (
-            total_ai_score / len(evaluation_results)
+            total_ai_score / total_questions
         )
 
         final_score = round(
@@ -9000,15 +9120,15 @@ def evaluate_mock_interview(
 
         # 9. Notify the employee who created the course
         existing_notification = (
-        db.query(models.EmployeeNotification)
-        .filter(
-        models.EmployeeNotification.employee_id
-        == course.created_by,
-        models.EmployeeNotification.mock_interview_id
-        == interview.id
-    )
-    .first()
-)
+            db.query(models.EmployeeNotification)
+            .filter(
+                models.EmployeeNotification.employee_id
+                == course.created_by,
+                models.EmployeeNotification.mock_interview_id
+                == interview.id
+            )
+            .first()
+        )
 
         if not existing_notification:
             employee_notification = models.EmployeeNotification(
@@ -9016,19 +9136,23 @@ def evaluate_mock_interview(
                 training_course_id=course.id,
                 mock_interview_id=interview.id,
                 message=(
-            f"Mock interview completed by {student.full_name} "
-            f"for {course.job_role}. "
-            "The result is awaiting your review and publication."
+                    f"Mock interview completed by {student.full_name} "
+                    f"for {course.job_role}. "
+                    "The result is awaiting your review and publication."
                 ),
                 is_read=False
             )
 
             db.add(employee_notification)
-# Commit the evaluation
+
+        # 10. Commit the evaluation
         db.commit()
 
         return {
-            "message": "Mock interview evaluation completed. Awaiting employee publication.",
+            "message": (
+                "Mock interview evaluation completed. "
+                "Awaiting employee publication."
+            ),
             "interview_id": interview.id,
             "evaluation_status": "Completed",
             "publication_status": "Pending"
@@ -9044,7 +9168,6 @@ def evaluate_mock_interview(
             status_code=500,
             detail=f"Mock interview evaluation failed: {str(e)}"
         )
-
 
 
 @app.get("/employee/mock-interview-results")

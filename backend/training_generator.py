@@ -326,6 +326,116 @@ Return exactly 5 questions.
         f"Mock interview question generation failed: {str(last_error)}"
     )
 
+def generate_hr_interview_questions(
+    job_role: str,
+    course_type: str
+) -> list[str]:
+
+    import json
+    import ollama
+
+    if not job_role or not job_role.strip():
+        raise ValueError("Invalid job role")
+
+    if course_type not in ["Coding", "Non-Coding"]:
+        raise ValueError("Invalid course type")
+
+    prompt = f"""
+You are an experienced HR interviewer conducting
+a professional company mock interview.
+
+Generate exactly 4 non-technical HR interview questions.
+
+Job Role:
+{job_role}
+
+Course Type:
+{course_type}
+
+Requirements:
+
+1. Questions must be relevant to the job role.
+2. Focus on communication, teamwork, adaptability,
+   responsibility, problem-solving approach,
+   handling challenges and workplace behaviour.
+3. Questions must encourage descriptive answers.
+4. Questions must be suitable for a spoken interview.
+5. Questions must be appropriate for a fresher or
+   entry-level candidate.
+6. Do not ask technical, coding or knowledge-based questions.
+7. Do not ask questions based on the candidate's resume.
+8. Do not ask questions based on personal conversations
+   or Self Discovery Studio answers.
+9. Avoid generic questions that only require Yes/No answers.
+10. Do not generate answers, explanations or MCQs.
+11. Do not repeat questions.
+
+Return only valid JSON:
+
+{{
+    "questions": [
+        "Question 1",
+        "Question 2",
+        "Question 3",
+        "Question 4"
+    ]
+}}
+
+Return exactly 4 questions.
+"""
+
+    last_error = None
+
+    for attempt in range(3):
+        try:
+            response = ollama.chat(
+                model="llama3.2:latest",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                format="json",
+                options={
+                    "temperature": 0.3,
+                    "num_predict": 1000
+                }
+            )
+
+            result = json.loads(
+                response["message"]["content"].strip()
+            )
+
+            questions = result.get("questions")
+
+            if not isinstance(questions, list) or len(questions) != 4:
+                raise ValueError(
+                    "AI must generate exactly 4 HR questions"
+                )
+
+            cleaned_questions = []
+
+            for question in questions:
+                if not isinstance(question, str) or not question.strip():
+                    raise ValueError("Invalid HR question generated")
+
+                cleaned_questions.append(question.strip())
+
+            if len({
+                question.casefold()
+                for question in cleaned_questions
+            }) != 4:
+                raise ValueError("Duplicate HR questions generated")
+
+            return cleaned_questions
+
+        except Exception as error:
+            last_error = error
+
+    raise ValueError(
+        f"HR question generation failed: {str(last_error)}"
+    )
 
 
 
@@ -833,11 +943,13 @@ Remember:
     return analysis_text
 
 
+
 def evaluate_mock_interview_answer(
     question: str,
     answer: str,
     job_role: str,
-    course_type: str
+    course_type: str,
+    question_type: str
 ) -> dict:
 
     if not question.strip():
@@ -846,23 +958,28 @@ def evaluate_mock_interview_answer(
     if not answer.strip():
         raise ValueError("Answer cannot be empty")
 
-    prompt = f"""
-You are an experienced technical interviewer.
+    evaluation_criteria = {
+        "Introduction": """
+Evaluation criteria:
 
-Evaluate the candidate's answer objectively.
+1. Introduction quality (0-40):
+Evaluate whether the candidate introduces themselves appropriately,
+covers their educational background, skills and interests,
+and presents relevant information.
 
-Job Role:
-{job_role}
+2. Relevance (0-20):
+Evaluate how relevant the introduction is to the job role.
 
-Course Type:
-{course_type}
+3. Self-awareness and completeness (0-20):
+Evaluate whether the candidate demonstrates awareness of their
+skills, learning journey, interests and career direction.
 
-Interview Question:
-{question}
+4. Explanation clarity (0-10):
+Evaluate whether the introduction is understandable,
+natural and logically structured.
+""",
 
-Candidate's Answer:
-{answer}
-
+        "Technical": """
 Evaluation criteria:
 
 1. Technical correctness (0-40):
@@ -875,7 +992,62 @@ Evaluate how directly the answer addresses the question.
 Evaluate practical understanding, reasoning and depth.
 
 4. Explanation clarity (0-10):
-Evaluate whether the explanation is understandable and logically structured.
+Evaluate whether the explanation is understandable
+and logically structured.
+""",
+
+        "HR": """
+Evaluation criteria:
+
+1. Answer quality (0-40):
+Evaluate the quality of the candidate's response,
+including the situation described, actions taken,
+reasoning and outcome where applicable.
+
+2. Relevance (0-20):
+Evaluate how directly the answer addresses the HR question
+and its relevance to the workplace.
+
+3. Reasoning and practical judgment (0-20):
+Evaluate the candidate's reasoning, approach to challenges,
+decision-making and ability to reflect.
+
+4. Explanation clarity (0-10):
+Evaluate whether the answer is understandable,
+coherent and logically structured.
+
+Do not require a specific framework such as STAR.
+Accept answers that explain the situation and approach naturally.
+Do not penalize candidates for lacking professional experience
+when they provide relevant academic, personal or project examples.
+"""
+    }
+
+    if question_type not in evaluation_criteria:
+        raise ValueError("Invalid interview question type")
+
+    prompt = f"""
+You are an experienced interviewer evaluating an entry-level candidate.
+
+Evaluate the candidate's answer objectively using the criteria
+specifically designed for the question type.
+
+Job Role:
+{job_role}
+
+Course Type:
+{course_type}
+
+Question Type:
+{question_type}
+
+Interview Question:
+{question}
+
+Candidate's Answer:
+{answer}
+
+{evaluation_criteria[question_type]}
 
 Important rules:
 
@@ -883,13 +1055,22 @@ Important rules:
 - Do not penalize hesitation, repeated words or self-correction
   when they do not affect the actual answer.
 - Do not assume missing skills or experience.
-- Do not reward incorrect technical claims.
+- Do not reward incorrect technical claims in technical questions.
 - Accept technically valid alternative approaches.
 - Do not expect an advanced answer from a junior candidate
   when a correct basic explanation is sufficient.
+- For HR questions, evaluate the answer's quality and reasoning,
+  not whether the candidate gives a perfect or ideal response.
+- For introduction questions, do not expect the candidate
+  to answer unrelated technical questions.
 - If the candidate says "I don't know", evaluate the answer
   honestly without inventing knowledge.
+- Do not penalize lack of professional experience if relevant
+  academic, personal or project experiences are provided.
 - Never infer personality, intelligence or mental state.
+- Never invent details that are not present in the answer.
+- Feedback must be specific to the candidate's actual answer.
+- Scores must reflect the criteria, not personal preference.
 
 Return ONLY valid JSON:
 
@@ -948,7 +1129,10 @@ All scores must be numeric and within their respective limits.
 
             feedback = result.get("feedback")
 
-            if not isinstance(feedback, str) or not feedback.strip():
+            if (
+                not isinstance(feedback, str)
+                or not feedback.strip()
+            ):
                 raise ValueError("Invalid evaluation feedback")
 
             result["ai_score"] = round(
@@ -964,9 +1148,6 @@ All scores must be numeric and within their respective limits.
     raise ValueError(
         f"Mock interview evaluation failed: {str(last_error)}"
     )
-
-
-
 
 
 
