@@ -29,7 +29,7 @@ import ViewVacanciesSt from '../pages/student/ViewVacanciesSt';
 import UploadResume from '../pages/student/UploadResume';
 import ViewConfirmedInterview from '../pages/student/ViewConfirmedInterview';
 import ViewInterviewResults from '../pages/student/ViewInterviewResults';
-import StudentFeedback from '../pages/Student/StudentFeedback';
+import StudentFeedback from '../pages/student/StudentFeedback';
 import StudentMyProfile from '../pages/student/StudentMyProfile';
 import ViewAnnouncements from '../pages/student/ViewAnnouncements';
 import AppliedJobsHistory from '../pages/student/AppliedJobsHistory';
