@@ -1,0 +1,438 @@
+
+from datetime import date ,datetime , time 
+from typing import Optional
+
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
+
+
+class StudentRegister(BaseModel):
+    full_name: str = Field(min_length=2, max_length=100)
+    email: EmailStr
+    phone: str = Field(min_length=7, max_length=20)
+    date_of_birth: date
+    gender: str = Field(min_length=1, max_length=20)
+    address: str = Field(min_length=5, max_length=500)
+    qualification: str = Field(min_length=2, max_length=100)
+    department: str = Field(min_length=2, max_length=100)
+    year_of_passing: int = Field(ge=1950, le=2100)
+    skills: str = Field(min_length=1, max_length=1000)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class StudentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    full_name: str
+    email: EmailStr
+    phone: str
+    qualification: str
+    department: str
+    year_of_passing: int
+    skills: str
+    profile_photo: str | None = None
+
+class EmployeeRegister(BaseModel):
+    full_name: str = Field(min_length=2, max_length=100)
+    email: EmailStr
+    phone: str = Field(min_length=7, max_length=20)
+    designation: str = Field(min_length=2, max_length=100)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class EmployeeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    full_name: str
+    email: EmailStr
+    phone: str
+    designation: str
+    status: str
+    profile_photo: str | None = None
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    role: str
+
+
+class EmployeeStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(Active|Rejected)$")
+
+
+
+class JobCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=150)
+    description: str = Field(min_length=10)
+    qualification: str = Field(min_length=2, max_length=150)
+    department: str = Field(min_length=2, max_length=100)
+    location: str = Field(min_length=2, max_length=150)
+    salary: str | None = None
+    employment_type: str = Field(min_length=2, max_length=50)
+    vacancies: int = Field(ge=1)
+
+
+class JobResponse(BaseModel):
+    id: int
+    title: str
+    description: str
+    qualification: str
+    department: str
+    location: str
+    salary: str | None
+    employment_type: str
+    vacancies: int
+    status: str
+    created_by: int
+
+    class Config:
+        from_attributes = True
+
+class AdminChangePassword(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+class CompanyCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    industry: str = Field(..., min_length=1, max_length=100)
+    address: str = Field(..., min_length=1, max_length=500)
+    website: str | None = None
+    contact_number: str = Field(..., min_length=1, max_length=20)
+    email: EmailStr
+    size: str | None = Field(default=None, max_length=50)
+    description: str | None = None
+
+
+class CompanyResponse(BaseModel):
+    id: int
+    name: str
+    industry: str
+    address: str
+    website: str | None
+    contact_number: str
+    email: str
+    size: str | None
+    description: str | None
+    logo: str | None
+    is_active: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class VacancyCreate(BaseModel):
+    company_id: int = Field(ge=1)
+    title: str = Field(min_length=2, max_length=150)
+    description: str = Field(min_length=10)
+    required_skills: str = Field(min_length=1, max_length=1000)
+    qualification: str = Field(min_length=2, max_length=150)
+    location: str = Field(min_length=2, max_length=150)
+    salary_range: str | None = Field(default=None, max_length=100)
+    employment_type: str = Field(min_length=2, max_length=50)
+    openings: int = Field(ge=1)
+
+
+class VacancyResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    company_id: int
+    title: str
+    description: str
+    required_skills: str
+    qualification: str
+    location: str
+    salary_range: str | None
+    employment_type: str
+    openings: int
+    status: str
+    created_by: int
+    created_at: datetime
+
+class VacancyUpdate(BaseModel):
+    title: str = Field(min_length=2, max_length=150)
+    description: str = Field(min_length=10)
+    required_skills: str = Field(min_length=1, max_length=1000)
+    qualification: str = Field(min_length=2, max_length=150)
+    location: str = Field(min_length=2, max_length=150)
+    salary_range: str | None = Field(default=None, max_length=100)
+    employment_type: str = Field(min_length=2, max_length=50)
+    openings: int = Field(ge=1)
+
+
+class ApplicationCreate(BaseModel):
+    vacancy_id: int
+    resume_id: int
+
+class InterviewCreate(BaseModel):
+    application_id: int
+    interview_date: date
+    interview_time: time
+    mode: str
+    meeting_link_or_venue: str
+    notes: Optional[str] = None
+
+
+class InterviewResponse(BaseModel):
+    interview_id: int
+    application_id: int
+    interview_date: date
+    interview_time: time
+    mode: str
+    meeting_link_or_venue: str
+    status: str
+    student_attendance: str
+    notes: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    created_by: int
+
+
+class InterviewStatusUpdate(BaseModel):
+    status: str
+
+class InterviewAttendanceUpdate(BaseModel):
+    student_attendance: str
+
+class InterviewResultCreate(BaseModel):
+    interview_id: int
+    result: str
+    score: Optional[float] = None
+    feedback: Optional[str] = None
+
+
+class InterviewResultResponse(BaseModel):
+    result_id: int
+    interview_id: int
+    result: str
+    score: Optional[float] = None
+    feedback: Optional[str] = None
+    published_on: Optional[datetime] = None
+    is_published: bool
+    created_at: datetime
+
+
+class InterviewResultPublish(BaseModel):
+    is_published: bool
+
+class StudentInterviewResultResponse(BaseModel):
+    result_id: int
+    interview_id: int
+    interview_date: date
+    interview_time: time
+    mode: str
+    result: str
+    score: Optional[float] = None
+    feedback: Optional[str] = None
+    published_on: Optional[datetime] = None
+
+class AnnouncementCreate(BaseModel):
+    recipient_type: str
+    message: str
+
+class StudentFeedbackCreate(BaseModel):
+    message: str
+
+class EmployeeAnnouncementCreate(BaseModel):
+    message: str
+
+class TrainingEligibilityResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    student_id: int
+    rejected_application_count: int
+    cycle_number: int
+    status: str
+    reviewed_by: int | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+
+
+class TrainingEligibilityReview(BaseModel):
+    status: str = Field(pattern="^(Approved|Rejected)$")
+
+class TrainingCourseCreate(BaseModel):
+    course_type: str = Field(pattern="^(Coding|Non-Coding)$")
+    job_role: str = Field(min_length=2, max_length=150)
+
+
+class TrainingCourseResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    course_type: str
+    job_role: str
+    created_by: int
+    created_at: datetime
+    status: str
+
+class TrainingEnrollmentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    eligibility_id: int
+    student_id: int
+    course_id: int
+    status: str
+    enrolled_at: datetime
+    completed_at: datetime | None = None
+
+class InterviewAnalysisCreate(BaseModel):
+    enrollment_id: int
+    interview_explanation: str
+
+class InterviewAnalysisResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    student_id: int
+    enrollment_id: int
+    job_role: str
+    course_type: str
+    resume_skills: list[str]
+    interview_explanation: str
+    created_at: datetime
+
+class InterviewAnalysisReportResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    analysis_id: int
+    heading: str
+    description: str
+    report_type: str
+    pdf_path: str
+    created_at: datetime
+
+class TrainingResumeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    student_id: int
+    file_type: str
+    file_size: int
+    file_path: str
+    uploaded_at: datetime
+    is_active: bool
+    processing_status: str
+
+class TrainingPartResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    enrollment_id: int
+    part_number: int
+    title: str
+    pdf_path: str | None = None
+    generation_status: str
+    generated_at: datetime | None = None
+    created_at: datetime
+
+class TrainingQuestionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    part_id: int
+    question: str
+    option_a: str
+    option_b: str
+    option_c: str
+    option_d: str
+
+
+class TrainingQuestionInternal(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    part_id: int
+    question: str
+    option_a: str
+    option_b: str
+    option_c: str
+    option_d: str
+    correct_option: str
+    explanation: str | None = None
+
+class TrainingAttemptResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    part_id: int
+    student_id: int
+    attempt_number: int
+    started_at: datetime
+    expires_at: datetime
+    submitted_at: datetime | None = None
+    score: int | None = None
+    status: str
+
+
+class TrainingAnswerSubmit(BaseModel):
+    question_id: int
+    selected_option: str = Field(pattern="^[A-D]$")
+
+
+class TrainingExamResult(BaseModel):
+    attempt_id: int
+    score: int
+    total_questions: int = 50
+    passed: bool
+    status: str
+
+
+class MockInterviewAnswerSubmit(BaseModel):
+    answer_transcript: str = Field(min_length=1, max_length=10000)
+
+    first_response_seconds: float = Field(default=0, ge=0)
+    answer_duration_seconds: float = Field(default=0, ge=0)
+    total_pause_seconds: float = Field(default=0, ge=0)
+    longest_pause_seconds: float = Field(default=0, ge=0)
+
+    repetition_count: int = Field(default=0, ge=0)
+
+class SelfDiscoverySessionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    enrollment_id: int
+    status: str
+    discovery_summary: dict | None = None
+    started_at: datetime
+    completed_at: datetime | None = None
+    
+class SelfDiscoveryChatResponse(BaseModel):
+    session: SelfDiscoverySessionResponse
+    reply: str
+    sequence_number: int
+
+    mode_message_counts: dict[str, int]
+    mode_completion: dict[str, bool]
+    minimum_messages_per_mode: int
+    continue_course_available: bool
+
+
+class SelfDiscoveryMessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    sequence_number: int
+    mode: str
+    role: str
+    message: str
+    created_at: datetime
+
+
+class SelfDiscoveryChatRequest(BaseModel):
+    mode: str
+    message: str = Field(min_length=1, max_length=5000)
+
+
+

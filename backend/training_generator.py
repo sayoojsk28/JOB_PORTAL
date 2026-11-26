@@ -1,7 +1,6 @@
 import os
 import json
-import ollama
-from datetime import datetime
+from gemini_service import generate_gemini_json, generate_gemini_text
 
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import (
@@ -114,23 +113,10 @@ Return exactly 5 strings in the questions array.
         for attempt in range(3):
 
             try:
-                response = ollama.chat(
-                    model="llama3.2:latest",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    format="json",
-                    options={
-                        "temperature": 0.3,
-                        "num_predict": 1200
-                    }
-                )
-
-                result = json.loads(
-                    response["message"]["content"].strip()
+                result = generate_gemini_json(
+                    prompt=prompt,
+                    temperature=0.3,
+                    max_output_tokens=1200,
                 )
 
                 questions = result.get("questions")
@@ -168,7 +154,7 @@ Return exactly 5 strings in the questions array.
                     )
 
                 if len({
-                    q.casefold() for q in cleaned_questions
+                  q.casefold() for q in cleaned_questions
                 }) != 5:
                     raise ValueError(
                         "Duplicate questions within batch"
@@ -203,7 +189,6 @@ def generate_mock_interview_questions(
 ) -> list[str]:
 
     import json
-    import ollama
 
     combined_resumes = "\n\n".join(
         f"Candidate Resume {index + 1}:\n{text}"
@@ -277,23 +262,10 @@ Return exactly 5 questions.
 
     for attempt in range(3):
         try:
-            response = ollama.chat(
-                model="llama3.2:latest",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                format="json",
-                options={
-                    "temperature": 0.3,
-                    "num_predict": 1200
-                }
-            )
-
-            result = json.loads(
-                response["message"]["content"].strip()
+            result = generate_gemini_json(
+                prompt=prompt,
+                temperature=0.3,
+                max_output_tokens=1200,
             )
 
             questions = result.get("questions")
@@ -332,7 +304,6 @@ def generate_hr_interview_questions(
 ) -> list[str]:
 
     import json
-    import ollama
 
     if not job_role or not job_role.strip():
         raise ValueError("Invalid job role")
@@ -388,23 +359,10 @@ Return exactly 4 questions.
 
     for attempt in range(3):
         try:
-            response = ollama.chat(
-                model="llama3.2:latest",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                format="json",
-                options={
-                    "temperature": 0.3,
-                    "num_predict": 1000
-                }
-            )
-
-            result = json.loads(
-                response["message"]["content"].strip()
+            result = generate_gemini_json(
+                prompt=prompt,
+                temperature=0.3,
+                max_output_tokens=1000,
             )
 
             questions = result.get("questions")
@@ -747,7 +705,6 @@ def analyze_training_questionnaire_with_ai(
 ) -> str:
 
     import re
-    import ollama
 
     # Prepare questionnaire content
     questionnaire_text = ""
@@ -907,25 +864,12 @@ Remember:
 """
 
 
-    response = ollama.chat(
-        model="qwen3:8b",
-        messages=[
-            {
-                "role": "system",
-                "content": system_prompt
-            },
-            {
-                "role": "user",
-                "content": user_prompt
-            }
-        ],
-        options={
-            "temperature": 0.2,
-            "num_predict": 2200
-        }
+    analysis_text = generate_gemini_text(
+        prompt=user_prompt,
+        system_prompt=system_prompt,
+        temperature=0.2,
+        max_output_tokens=2200,
     )
-
-    analysis_text = response["message"]["content"].strip()
 
     # Remove Qwen thinking tags if present
     analysis_text = re.sub(
@@ -1089,23 +1033,10 @@ All scores must be numeric and within their respective limits.
 
     for attempt in range(3):
         try:
-            response = ollama.chat(
-                model="llama3.2:latest",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                format="json",
-                options={
-                    "temperature": 0.1,
-                    "num_predict": 700
-                }
-            )
-
-            result = json.loads(
-                response["message"]["content"].strip()
+            result = generate_gemini_json(
+                prompt=prompt,
+                temperature=0.1,
+                max_output_tokens=700,
             )
 
             score_limits = {
@@ -1435,62 +1366,17 @@ Return ONLY valid JSON in this exact structure:
 
     for attempt in range(3):
         try:
-            response = ollama.chat(
-                model="llama3.2:latest",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """
-You are an expert Interview Analyst, Researcher, and
-Psychology-informed Career Development Guide.
-
-You are assisting a student who has experienced three interview
-rejections and needs meaningful help improving their non-technical
-skills and personal development.
-
-Your role is to understand, analyse and genuinely help the student
-according to the Self Discovery mode they have selected.
-
-Be intelligent, empathetic, practical, thoughtful and honest.
-
-Give useful explanations, advice, solutions and examples whenever
-the student needs them.
-
-Answer questions directly. When the student asks for a solution,
-provide the solution instead of asking another question.
-
-You are not a scripted interviewer or questionnaire.
-You do not need to ask questions in every response.
-Follow-up questions are optional and should only be asked
-when genuinely useful.
-
-Never provide superficial acknowledgements instead of meaningful help.
-Never repeatedly ask the same question.
-Never diagnose psychological or mental health conditions.
-Never assume personal weaknesses, interests or experiences.
-
-Respect the selected Self Discovery mode and never use information
-from other modes.
-
-Your primary goal is to genuinely help the student improve.
-
+            system_prompt = """
+You are an expert Interview Analyst, Researcher, and Career Development Guide.
+Help the student improve their non-technical skills with empathy and practical advice.
+Never diagnose or assume personal traits. Respect the selected mode.
 Return ONLY valid JSON containing the key "reply".
 """
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                format="json",
-                options={
-                    "temperature": 0.5,
-                    "num_predict": 900
-                }
-            )
-
-            result = json.loads(
-                response["message"]["content"].strip()
+            result = generate_gemini_json(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=0.5,
+                max_output_tokens=900,
             )
 
             reply = result.get("reply")

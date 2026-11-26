@@ -710,22 +710,10 @@ Resume:
 {resume_text}
 """
 
-    response = ollama.chat(
-        model="llama3.2:latest",
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        format="json",
-        options={
-            "temperature": 0.1
-        }
-    )
-
-    result = json.loads(
-        response["message"]["content"].strip()
+    result = generate_gemini_json(
+        prompt=prompt,
+        temperature=0.1,
+        max_output_tokens=500,
     )
 
     if not isinstance(result, dict):
@@ -798,26 +786,14 @@ Return ONLY a JSON object in this format:
 The course_type must be exactly "Coding" or "Non-Coding".
 """
 
-    response = ollama.chat(
-        model="llama3.2:latest",
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        format="json",
-        options={
-            "temperature": 0.0
-        }
-    )
-
-    result = json.loads(
-        response["message"]["content"].strip()
+    result = generate_gemini_json(
+        prompt=prompt,
+        temperature=0.0,
+        max_output_tokens=300,
     )
 
     if not isinstance(result, dict):
-        raise ValueError("AI returned invalid classification format")
+        raise ValueError("AI returned invalid skills format")
 
     course_type = result.get("course_type")
 
@@ -839,7 +815,6 @@ def analyze_interview_with_ai(
 
     import json
     import re
-    import ollama
 
     MODEL = "qwen3:8b "
 
@@ -1195,25 +1170,13 @@ Candidate's Interview Experiences:
 
     try:
 
-        response = ollama.chat(
-            model=MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": SYSTEM_PROMPT
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt
-                }
-            ],
-            format="json",
-            options={
-                "temperature": 0.3
-            }
+        analysis = generate_gemini_json(
+            prompt=user_prompt,
+            system_prompt=SYSTEM_PROMPT,
+            temperature=0.3,
+            max_output_tokens=1800,
         )
-
-        raw_response = response["message"]["content"]
+        raw_response = json.dumps(analysis, ensure_ascii=False)
 
         if not raw_response or not raw_response.strip():
             raise ValueError("AI returned an empty response")
@@ -7486,7 +7449,42 @@ def get_student_training_course_submission(
         "pdf_url": f"/student/training-course-submissions/{submission.id}/pdf"
     }
 
+@app.get(
+    "/student/training-courses/{course_id}/self-discovery/status"
+)
+def get_self_discovery_status(
+    course_id: int,
+    db: Session = Depends(get_db),
+    student: models.Student = Depends(require_student),
+):
+    enrollment = (
+        db.query(models.TrainingEnrollment)
+        .filter(
+            models.TrainingEnrollment.course_id == course_id,
+            models.TrainingEnrollment.student_id == student.id,
+            models.TrainingEnrollment.status == "Active"
+        )
+        .first()
+    )
 
+    if not enrollment:
+        raise HTTPException(
+            status_code=404,
+            detail="Active training enrollment not found."
+        )
+
+    session = (
+        db.query(models.SelfDiscoverySession)
+        .filter(
+            models.SelfDiscoverySession.enrollment_id == enrollment.id
+        )
+        .first()
+    )
+
+    return {
+        "status": session.status if session else "Not Started",
+        "completed": session is not None and session.status == "Completed"
+    }
 
 @app.post("/student/training-courses/{course_id}/self-discovery/start")
 def start_self_discovery(

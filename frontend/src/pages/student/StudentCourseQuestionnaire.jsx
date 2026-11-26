@@ -25,6 +25,8 @@ function StudentCourseQuestionnaire() {
   // Course completion
   const [completing, setCompleting] = useState(false);
   const [completionError, setCompletionError] = useState('');
+  const [selfDiscoveryCompleted, setSelfDiscoveryCompleted] = useState(false);
+  const [selfDiscoveryStatusLoading, setSelfDiscoveryStatusLoading] = useState(true);
 
   // Load questionnaire and recover existing submission
   useEffect(() => {
@@ -137,6 +139,38 @@ function StudentCourseQuestionnaire() {
       cancelled = true;
     };
   }, [courseId]);
+
+  useEffect(() => {
+  let cancelled = false;
+
+  const fetchSelfDiscoveryStatus = async () => {
+    try {
+      setSelfDiscoveryStatusLoading(true);
+
+      const response = await api.get(
+        `/student/training-courses/${courseId}/self-discovery/status`
+      );
+
+      if (!cancelled) {
+        setSelfDiscoveryCompleted(response.data.completed);
+      }
+    } catch (err) {
+      if (!cancelled) {
+        setSelfDiscoveryCompleted(false);
+      }
+    } finally {
+      if (!cancelled) {
+        setSelfDiscoveryStatusLoading(false);
+      }
+    }
+  };
+
+  fetchSelfDiscoveryStatus();
+
+  return () => {
+    cancelled = true;
+  };
+}, [courseId]);
 
   // Clean up generated PDF URL
   useEffect(() => {
@@ -522,14 +556,26 @@ function StudentCourseQuestionnaire() {
                     <>
                       {/* Not Started - Continue Self Discovery */}
                       {nextAction === 'self-discovery' && (
-                        <button
-                          type="button"
-                          onClick={handleContinueToSelfDiscovery}
-                          className="w-full rounded-xl bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-700"
-                        >
-                          Continue to Self Discovery →
-                        </button>
-                      )}
+  <>
+    <button
+      type="button"
+      onClick={handleContinueToSelfDiscovery}
+      className="w-full rounded-xl bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-700"
+    >
+      Explore Self Discovery →
+    </button>
+
+    {!selfDiscoveryStatusLoading && selfDiscoveryCompleted && (
+      <button
+        type="button"
+        onClick={handleContinueMockInterview}
+        className="mt-3 w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+      >
+        Continue to Mock Interview →
+      </button>
+    )}
+  </>
+)}
 
                       {/* In Progress - Continue Mock Interview */}
                       {nextAction === 'continue-interview' && (
