@@ -3715,6 +3715,47 @@ def get_student_vacancies(
         "limit": limit,
     }
 
+@app.get("/student/vacancies/{vacancy_id}")
+def get_student_vacancy(
+    vacancy_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if not isinstance(current_user, models.Student):
+        raise HTTPException(
+            status_code=403,
+            detail="Only students can view vacancies",
+        )
+
+    result = (
+        db.query(
+            models.Vacancy,
+            models.Company.name.label("company_name")
+        )
+        .join(
+            models.Company,
+            models.Vacancy.company_id == models.Company.id
+        )
+        .filter(models.Vacancy.id == vacancy_id)
+        .first()
+    )
+
+    if not result:
+        raise HTTPException(
+            status_code=404,
+            detail="Vacancy not found",
+        )
+
+    vacancy, company_name = result
+
+    vacancy_data = {
+        column.name: getattr(vacancy, column.name)
+        for column in models.Vacancy.__table__.columns
+    }
+
+    vacancy_data["company_name"] = company_name
+
+    return vacancy_data
 
 @app.post("/student/resumes/upload")
 def upload_student_resume(
