@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -8,6 +7,7 @@ import {
 } from 'react-phone-number-input';
 import countryNames from 'react-phone-number-input/locale/en.json';
 import api from '../../services/api';
+import { getAssetUrl } from '../../utils/apiUrl';
 
 const initialForm = {
   name: '',
@@ -96,7 +96,7 @@ const PostCompanies = () => {
 
       setLogoPreview(
         company.logo
-          ? `http://127.0.0.1:8000${company.logo}`
+          ? getAssetUrl(company.logo)
           : ''
       );
     } catch (err) {

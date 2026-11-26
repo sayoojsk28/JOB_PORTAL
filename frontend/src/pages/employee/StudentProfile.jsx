@@ -1,7 +1,7 @@
-
 import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api from '../../services/api';
+import { getAssetUrl } from '../../../utils/apiUrl';
 
 const StudentProfile = () => {
   const { studentId } = useParams();
@@ -36,7 +36,7 @@ const StudentProfile = () => {
   const getPhotoUrl = (photoPath) => {
     if (!photoPath) return null;
 
-    return `http://127.0.0.1:8000/${photoPath.replace(/^\/+/, '')}`;
+    return getAssetUrl(photoPath);
   };
 
   const formatDate = (date) => {

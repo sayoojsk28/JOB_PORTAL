@@ -1,7 +1,7 @@
-
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { getAssetUrl } from '../../utils/apiUrl';
 
 export default function StudentEditProfile() {
   const navigate = useNavigate();
@@ -134,7 +134,7 @@ export default function StudentEditProfile() {
   const displayedPhoto = photoPreview
     ? photoPreview
     : currentPhoto
-      ? `http://127.0.0.1:8000/${currentPhoto.replace(/^\/+/, '')}`
+      ? getAssetUrl(currentPhoto)
       : null;
 
   useEffect(() => {

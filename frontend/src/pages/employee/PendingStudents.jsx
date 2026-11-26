@@ -1,7 +1,7 @@
-
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../services/api';
+import { getAssetUrl } from '../../utils/apiUrl';
 
 const PendingStudents = () => {
   const [students, setStudents] = useState([]);
@@ -231,7 +231,7 @@ const PendingStudents = () => {
                     <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-blue-100 bg-blue-50">
   {student.profile_photo ? (
     <img
-      src={`http://127.0.0.1:8000/${student.profile_photo.replace(/^\/+/, '')}`}
+      src={getAssetUrl(student.profile_photo)}
       alt={`${student.full_name || 'Student'} profile`}
       className="h-full w-full object-cover"
       onError={(e) => {

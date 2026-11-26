@@ -1,7 +1,7 @@
-
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { getAssetUrl } from '../../utils/apiUrl';
 
 const inputClass =
   'mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100';
@@ -158,7 +158,7 @@ const EmployeeEditDetails = () => {
   const photoUrl = displayedPhoto
     ? displayedPhoto.startsWith('blob:')
       ? displayedPhoto
-      : `http://127.0.0.1:8000${displayedPhoto}`
+      : getAssetUrl(displayedPhoto)
     : null;
 
   return (

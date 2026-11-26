@@ -1,7 +1,7 @@
-
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../services/api';
+import { getAssetUrl } from '../../utils/apiUrl';
 
 const PendingEmployees = () => {
   const [employees, setEmployees] = useState([]);
@@ -217,7 +217,7 @@ const confirmStatusUpdate = async () => {
 <div className="h-16 w-16 shrink-0 overflow-hidden rounded-full border-2 border-blue-100 bg-blue-50">
   {employee.profile_photo ? (
     <img
-      src={`http://127.0.0.1:8000${employee.profile_photo}`}
+      src={getAssetUrl(employee.profile_photo)}
       alt={`${employee.full_name || 'Employee'} profile`}
       className="h-full w-full object-cover"
       onError={(e) => {

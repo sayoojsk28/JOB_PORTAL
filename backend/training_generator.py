@@ -263,10 +263,22 @@ Return exactly 5 questions.
     for attempt in range(3):
         try:
             result = generate_gemini_json(
-                prompt=prompt,
-                temperature=0.3,
-                max_output_tokens=1200,
-            )
+    prompt=prompt,
+    temperature=0.3,
+    max_output_tokens=2048,
+    response_schema={
+        "type": "OBJECT",
+        "properties": {
+            "questions": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "STRING"
+                }
+            }
+        },
+        "required": ["questions"]
+    }
+)
 
             questions = result.get("questions")
 
@@ -1316,6 +1328,17 @@ RESPONSE LENGTH:
 - Do not make every response one short sentence.
 - Do not produce unnecessarily long responses.
 
+MARKDOWN FORMATTING:
+
+- Use standard Markdown formatting only.
+- Use **text** for bold and *text* for italics.
+- Never escape Markdown characters unnecessarily.
+- Do not output sequences like \*\*, \* or \_.
+- Do not use HTML entities such as &#x20;.
+- Use normal spaces and natural line breaks.
+- Use standard numbered lists and bullet points.
+- Keep formatting clean and readable.
+
 PERSONALISATION:
 
 - Use relevant information from the current conversation.
@@ -1375,8 +1398,8 @@ Return ONLY valid JSON containing the key "reply".
             result = generate_gemini_json(
                 prompt=prompt,
                 system_prompt=system_prompt,
-                temperature=0.5,
-                max_output_tokens=900,
+                temperature=0.7,
+                max_output_tokens=4096,
             )
 
             reply = result.get("reply")

@@ -1,7 +1,7 @@
-
 import { useEffect, useState } from 'react';
 import api from '../../services/api';
 import { useNavigate } from 'react-router-dom';
+import { getAssetUrl } from '../../utils/apiUrl';
 
 function ViewAcceptedCompanies() {
   const navigate = useNavigate();
@@ -85,7 +85,7 @@ function ViewAcceptedCompanies() {
                 >
                   {company.logo && (
                     <img
-                      src={`http://127.0.0.1:8000${company.logo}`}
+                      src={getAssetUrl(company.logo)}
                       alt={company.name}
                       className="mb-4 h-20 w-20 rounded-lg border object-contain"
                     />

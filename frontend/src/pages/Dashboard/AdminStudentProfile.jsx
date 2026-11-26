@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api from '../../services/api';
+import { getAssetUrl } from '../../utils/apiUrl';
 
 const AdminStudentProfile = () => {
   const { studentId } = useParams();
@@ -35,7 +36,7 @@ const AdminStudentProfile = () => {
   const getPhotoUrl = (photoPath) => {
     if (!photoPath) return null;
 
-    return `http://127.0.0.1:8000/${photoPath.replace(/^\/+/, '')}`;
+    return getAssetUrl(photoPath);
   };
 
   const formatDate = (date) => {
@@ -118,7 +119,7 @@ const AdminStudentProfile = () => {
                 <div className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-2xl border-4 border-white bg-blue-50 shadow-md sm:h-32 sm:w-32">
                   {student.profile_photo ? (
                     <img
-                      src={getPhotoUrl(student.profile_photo)}
+                      src={getAssetUrl(student.profile_photo)}
                       alt={student.full_name}
                       className="h-full w-full object-cover"
                     />

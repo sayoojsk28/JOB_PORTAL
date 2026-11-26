@@ -1,7 +1,7 @@
-
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../services/api';
+import { getAssetUrl } from '../../utils/apiUrl';
 
 const ViewEmployees = () => {
   const [employees, setEmployees] = useState([]);
@@ -168,7 +168,7 @@ const ViewEmployees = () => {
                       <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-blue-100 bg-blue-50 text-xl font-bold text-blue-800">
                         {employee.profile_photo ? (
                           <img
-                            src={`http://127.0.0.1:8000${employee.profile_photo}`}
+                            src={getAssetUrl(employee.profile_photo)}
                             alt={`${employee.full_name || 'Employee'} profile`}
                             className="h-full w-full object-cover"
                             onError={(e) => {

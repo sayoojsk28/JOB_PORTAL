@@ -1,3 +1,4 @@
+import ReactMarkdown from 'react-markdown';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import api from '../../services/api';
@@ -396,9 +397,55 @@ function SelfDiscoveryChat() {
                     {message.role === 'user' ? 'You' : 'AI Guide'}
                   </p>
 
-                  <p className="whitespace-pre-wrap text-sm leading-7">
-                    {message.message || message.content}
-                  </p>
+                  <div className="text-sm leading-7 break-words">
+  <ReactMarkdown
+    components={{
+      p: ({ children }) => (
+        <p className="mb-3 last:mb-0">
+          {children}
+        </p>
+      ),
+      strong: ({ children }) => (
+        <strong className="font-bold">
+          {children}
+        </strong>
+      ),
+      em: ({ children }) => (
+        <em>{children}</em>
+      ),
+      ul: ({ children }) => (
+        <ul className="mb-3 list-disc pl-6 space-y-1">
+          {children}
+        </ul>
+      ),
+      ol: ({ children }) => (
+        <ol className="mb-3 list-decimal pl-6 space-y-1">
+          {children}
+        </ol>
+      ),
+      li: ({ children }) => (
+        <li>{children}</li>
+      ),
+      h1: ({ children }) => (
+        <h1 className="mb-2 text-lg font-bold">
+          {children}
+        </h1>
+      ),
+      h2: ({ children }) => (
+        <h2 className="mb-2 text-base font-bold">
+          {children}
+        </h2>
+      ),
+      h3: ({ children }) => (
+        <h3 className="mb-2 font-bold">
+          {children}
+        </h3>
+      ),
+    }}
+  >
+    {message.message || message.content || ''}
+  </ReactMarkdown>
+</div>
 
                 </div>
 

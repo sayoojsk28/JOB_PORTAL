@@ -1,7 +1,7 @@
-
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { getAssetUrl } from '../../utils/apiUrl';
 
 const sections = [
   { id: 1, icon: '📁' },
@@ -68,7 +68,7 @@ const handlePlacedToggle = async () => {
   }
 };
   const photoUrl = student?.profile_photo
-    ? `http://127.0.0.1:8000/${student.profile_photo.replace(/^\/+/, '')}`
+    ? getAssetUrl(student.profile_photo)
     : null;
 
   if (loading) {

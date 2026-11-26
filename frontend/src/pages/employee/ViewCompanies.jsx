@@ -1,7 +1,7 @@
-
 import { useEffect, useState } from 'react';
 import api from '../../services/api';
 import { Link } from 'react-router-dom';
+import { getAssetUrl } from '../../utils/apiUrl';
 
 function ViewCompanies() {
   const [companies, setCompanies] = useState([]);
@@ -191,7 +191,7 @@ function ViewCompanies() {
                       <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-100 bg-slate-50">
                         {company.logo ? (
                           <img
-                            src={`http://127.0.0.1:8000${company.logo}`}
+                            src={getAssetUrl(company.logo)}
                             alt={`${company.name} logo`}
                             className="h-full w-full object-contain p-1.5"
                           />
