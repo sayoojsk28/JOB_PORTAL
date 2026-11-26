@@ -3621,8 +3621,11 @@ def update_vacancy(
     return vacancy
 
 
-@app.get("/student/vacancies", response_model=list[VacancyResponse])
+@app.get("/student/vacancies")
 def get_student_vacancies(
+    page: int = 1,
+    limit: int = 10,
+    search: str = "",
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -3632,14 +3635,40 @@ def get_student_vacancies(
             detail="Only students can view vacancies",
         )
 
+    query = db.query(models.Vacancy)
+
+    if search.strip():
+        search_term = f"%{search.strip()}%"
+
+        query = query.filter(
+            or_(
+                models.Vacancy.title.ilike(search_term),
+                models.Vacancy.location.ilike(search_term),
+                models.Vacancy.required_skills.ilike(search_term),
+                models.Vacancy.qualification.ilike(search_term),
+                models.Vacancy.employment_type.ilike(search_term),
+            )
+        )
+
+    total_vacancies = query.count()
+
     vacancies = (
-        db.query(models.Vacancy)
+        query
         .order_by(models.Vacancy.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
         .all()
     )
 
-    return vacancies
+    total_pages = (total_vacancies + limit - 1) // limit
 
+    return {
+        "vacancies": vacancies,
+        "total_vacancies": total_vacancies,
+        "total_pages": total_pages,
+        "current_page": page,
+        "limit": limit,
+    }
 
 @app.post("/student/resumes/upload")
 def upload_student_resume(
@@ -3647,18 +3676,23 @@ def upload_student_resume(
     db: Session = Depends(get_db),
     student: models.Student = Depends(require_student),
 ):
-    # 1. Allow PDF files only
+    # 1. Validate PDF
     if file.content_type != "application/pdf":
         raise HTTPException(
             status_code=400,
             detail="Only PDF files are allowed",
         )
 
-    # 2. Generate a unique filename
+    # 2. Generate unique filename
     filename = f"{uuid.uuid4()}.pdf"
-    file_path = os.path.join(UPLOADS_DIR, "resumes", filename)
 
-    # 3. Read and validate the file
+    # 3. Physical storage location
+    resume_dir = os.path.join(UPLOADS_DIR, "resumes")
+    os.makedirs(resume_dir, exist_ok=True)
+
+    file_path = os.path.join(resume_dir, filename)
+
+    # 4. Read uploaded file
     file_content = file.file.read()
 
     if not file_content:
@@ -3667,21 +3701,18 @@ def upload_student_resume(
             detail="Uploaded file is empty",
         )
 
-    # 4. Save the file
-    resume_dir = os.path.join(UPLOADS_DIR, "resumes")
-    os.makedirs(resume_dir, exist_ok=True)
-
-    file_path = os.path.join(resume_dir, filename)
-
+    # 5. Save PDF physically
     with open(file_path, "wb") as f:
         f.write(file_content)
 
-    # 5. Save file details in the database
+    # 6. Save relative path in database
+    db_file_path = f"resumes/{filename}"
+
     new_resume = models.Resume(
         student_id=student.id,
         file_type="application/pdf",
         file_size=len(file_content),
-        file_path=os.path.join(UPLOADS_DIR, "resumes", filename),
+        file_path=db_file_path,
         is_active="active",
     )
 
@@ -3689,7 +3720,6 @@ def upload_student_resume(
         db.add(new_resume)
         db.flush()
 
-        # Log resume upload
         log_action(
             db=db,
             user_id=student.user_id,
