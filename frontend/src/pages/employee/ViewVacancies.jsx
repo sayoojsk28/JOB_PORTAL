@@ -264,7 +264,7 @@ function ViewVacancies() {
                         </h3>
 
                         <p className="mt-1 text-sm text-slate-500">
-                          Company #{vacancy.company_id}
+                          {vacancy.company_name}
                         </p>
 
                         <span className="mt-2 inline-flex rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">

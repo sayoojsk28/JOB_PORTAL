@@ -3521,6 +3521,7 @@ def create_vacancy(
     return new_vacancy
 
 
+
 @app.get("/vacancies")
 def get_vacancies(
     page: int = 1,
@@ -3535,7 +3536,16 @@ def get_vacancies(
             detail="Only employees can view vacancies",
         )
 
-    query = db.query(models.Vacancy)
+    query = (
+        db.query(
+            models.Vacancy,
+            models.Company.name.label("company_name")
+        )
+        .join(
+            models.Company,
+            models.Vacancy.company_id == models.Company.id
+        )
+    )
 
     if search.strip():
         search_term = f"%{search.strip()}%"
@@ -3547,18 +3557,30 @@ def get_vacancies(
                 models.Vacancy.required_skills.ilike(search_term),
                 models.Vacancy.qualification.ilike(search_term),
                 models.Vacancy.employment_type.ilike(search_term),
+                models.Company.name.ilike(search_term),
             )
         )
 
     total_vacancies = query.count()
 
-    vacancies = (
+    results = (
         query
         .order_by(models.Vacancy.created_at.desc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()
     )
+
+    vacancies = []
+
+    for vacancy, company_name in results:
+        vacancy_data = {
+            column.name: getattr(vacancy, column.name)
+            for column in models.Vacancy.__table__.columns
+        }
+
+        vacancy_data["company_name"] = company_name
+        vacancies.append(vacancy_data)
 
     total_pages = (total_vacancies + limit - 1) // limit
 
@@ -3569,6 +3591,7 @@ def get_vacancies(
         "current_page": page,
         "limit": limit,
     }
+
 
 @app.put(
     "/vacancies/{vacancy_id}",
@@ -3621,6 +3644,7 @@ def update_vacancy(
     return vacancy
 
 
+
 @app.get("/student/vacancies")
 def get_student_vacancies(
     page: int = 1,
@@ -3635,7 +3659,16 @@ def get_student_vacancies(
             detail="Only students can view vacancies",
         )
 
-    query = db.query(models.Vacancy)
+    query = (
+        db.query(
+            models.Vacancy,
+            models.Company.name.label("company_name")
+        )
+        .join(
+            models.Company,
+            models.Vacancy.company_id == models.Company.id
+        )
+    )
 
     if search.strip():
         search_term = f"%{search.strip()}%"
@@ -3647,18 +3680,30 @@ def get_student_vacancies(
                 models.Vacancy.required_skills.ilike(search_term),
                 models.Vacancy.qualification.ilike(search_term),
                 models.Vacancy.employment_type.ilike(search_term),
+                models.Company.name.ilike(search_term),
             )
         )
 
     total_vacancies = query.count()
 
-    vacancies = (
+    results = (
         query
         .order_by(models.Vacancy.created_at.desc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()
     )
+
+    vacancies = []
+
+    for vacancy, company_name in results:
+        vacancy_data = {
+            column.name: getattr(vacancy, column.name)
+            for column in models.Vacancy.__table__.columns
+        }
+
+        vacancy_data["company_name"] = company_name
+        vacancies.append(vacancy_data)
 
     total_pages = (total_vacancies + limit - 1) // limit
 
@@ -3669,6 +3714,7 @@ def get_student_vacancies(
         "current_page": page,
         "limit": limit,
     }
+
 
 @app.post("/student/resumes/upload")
 def upload_student_resume(
